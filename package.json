@@ -1,0 +1,13 @@
+{
+  "name": "zectrix-note4c-display-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "docs:dev": "vitepress dev docs --port 3124",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs --port 3124"
+  },
+  "devDependencies": {
+    "vitepress": "^1.6.3"
+  }
+}
