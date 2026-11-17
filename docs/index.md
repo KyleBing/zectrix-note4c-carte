@@ -5,6 +5,9 @@ hero:
   name: NOTE4C Display
   text: 四色墨水屏开放固件
   tagline: ZECTRIX NOTE4C · ESP32-S3 · SSD2683 BWRY · PlatformIO Arduino
+  image:
+    src: /assets/app-icon.svg
+    alt: NOTE4C
   actions:
     - theme: brand
       text: 固件功能

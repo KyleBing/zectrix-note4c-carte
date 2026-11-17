@@ -32,7 +32,11 @@ export default defineConfig({
     preview: { port: 3124 },
   },
 
-  head: [['meta', { name: 'theme-color', content: '#111827' }]],
+  head: [
+    ['meta', { name: 'theme-color', content: '#111827' }],
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: `${base}assets/app-icon.svg` }],
+    ['link', { rel: 'apple-touch-icon', href: `${base}assets/app-icon.svg` }],
+  ],
 
   markdown: {
     config(md) {
@@ -50,6 +54,7 @@ export default defineConfig({
   },
 
   themeConfig: {
+    logo: '/assets/app-icon.svg',
     siteTitle: 'NOTE4C',
     socialLinks: [
       { icon: 'github', link: 'https://github.com/KyleBing/zectrix-note4c-display' },
