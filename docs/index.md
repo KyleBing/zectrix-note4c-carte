@@ -6,12 +6,12 @@ hero:
   text: 四色墨水屏开放固件
   tagline: ZECTRIX NOTE4C · ESP32-S3 · SSD2683 BWRY · PlatformIO Arduino
   image:
-    src: /assets/app-icon.svg
+    src: /assets/appicon-sketch.svg
     alt: NOTE4C
   actions:
     - theme: brand
       text: 固件功能
-      link: /firmware/features
+      link: /features/
     - theme: alt
       text: 从零开发
       link: /guide/getting-started
@@ -51,4 +51,4 @@ pio run -t upload       # 刷写
 pio device monitor      # 串口 115200
 ```
 
-更多：[固件功能说明](/firmware/features) · [从零开发指南](/guide/getting-started) · [硬件参数](/hardware/note4c)
+更多：[固件功能说明](/features/) · [从零开发指南](/guide/getting-started) · [硬件参数](/hardware/note4c)

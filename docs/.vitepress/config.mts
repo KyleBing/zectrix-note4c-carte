@@ -34,8 +34,8 @@ export default defineConfig({
 
   head: [
     ['meta', { name: 'theme-color', content: '#111827' }],
-    ['link', { rel: 'icon', type: 'image/svg+xml', href: `${base}assets/app-icon.svg` }],
-    ['link', { rel: 'apple-touch-icon', href: `${base}assets/app-icon.svg` }],
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: `${base}assets/favicon.svg` }],
+    ['link', { rel: 'apple-touch-icon', href: `${base}assets/favicon.svg` }],
   ],
 
   markdown: {
@@ -54,7 +54,7 @@ export default defineConfig({
   },
 
   themeConfig: {
-    logo: '/assets/app-icon.svg',
+    logo: '/assets/favicon.svg',
     siteTitle: 'NOTE4C',
     socialLinks: [
       { icon: 'github', link: 'https://github.com/KyleBing/zectrix-note4c-display' },
@@ -66,7 +66,7 @@ export default defineConfig({
     },
     nav: [
       { text: '首页', link: '/' },
-      { text: '固件功能', link: '/firmware/features' },
+      { text: '固件功能', link: '/features/' },
       { text: '从零开发', link: '/guide/getting-started' },
       {
         text: '硬件',
@@ -90,7 +90,7 @@ export default defineConfig({
         text: '开始',
         items: [
           { text: '简介', link: '/' },
-          { text: '固件功能', link: '/firmware/features' },
+          { text: '固件功能', link: '/features/' },
           { text: '从零开发', link: '/guide/getting-started' },
         ],
       },

@@ -2,7 +2,7 @@
 
 PlatformIO + Arduino。串口 + **四色墨水屏状态页**。
 
-完整说明见文档站：[固件功能](../docs/firmware/features.md)（线上：https://kylebing.github.io/zectrix-note4c-display/firmware/features）。
+完整说明见文档站：[固件功能](../docs/features/index.md)（线上：https://kylebing.github.io/zectrix-note4c-display/features/）。
 
 ## 编译 / 刷写
 

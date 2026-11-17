@@ -87,11 +87,17 @@ cd youn-ink-fourcolor-firmware/firmware
 
 ```text
 zectrix-note4c-display/
-├── docs/                     # VitePress 文档站
-├── firmware/                 # 当前：PlatformIO Arduino 硬件自检
+├── docs/                     # 文档站（独立 npm / VitePress）
+│   ├── package.json
+│   ├── .vitepress/
+│   ├── features/             # 固件功能说明页
+│   ├── guide/
+│   └── hardware/
+├── firmware/                 # 固件（独立 PlatformIO）
 │   ├── platformio.ini
 │   ├── include/board.h
 │   └── src/main.cpp
+├── design/                   # 图标等设计源文件
 └── third_party/              # 可选：本地挂参考仓对照屏驱
 ```
 
