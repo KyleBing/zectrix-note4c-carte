@@ -9,6 +9,7 @@
 *.elf
 *.map
 !dist/.gitkeep
+!firmware/data/uni2gb.bin
 sdkconfig
 sdkconfig.old
 build/
