@@ -28,22 +28,51 @@ struct HwStatus {
 
 static bool i2cAck(uint8_t addr) {
   Wire.beginTransmission(addr);
-  return Wire.endTransmission() == 0;
+  // 0 = success; non-zero includes NACK / timeout — never hang forever
+  return Wire.endTransmission(true) == 0;
 }
 
-static void i2cScan(const char *tag) {
-  Serial.printf("[I2C] scan (%s)\n", tag);
-  int found = 0;
-  for (uint8_t addr = 1; addr < 127; addr++) {
-    if (!i2cAck(addr)) continue;
-    found++;
-    const char *name = "";
-    if (addr == I2C_ADDR_RTC) name = "  << PCF8563 RTC";
-    else if (addr == I2C_ADDR_NFC) name = "  << NFC";
-    else if (addr == I2C_ADDR_ES8311) name = "  << ES8311?";
-    Serial.printf("  - 0x%02X%s\n", addr, name);
+// If a slave holds SDA low, clock out until free (common I2C bus recovery).
+static void i2cBusRecover() {
+  Wire.end();
+  pinMode(PIN_I2C_SDA, INPUT_PULLUP);
+  pinMode(PIN_I2C_SCL, OUTPUT);
+  for (int i = 0; i < 9; i++) {
+    digitalWrite(PIN_I2C_SCL, LOW);
+    delayMicroseconds(5);
+    digitalWrite(PIN_I2C_SCL, HIGH);
+    delayMicroseconds(5);
+    if (digitalRead(PIN_I2C_SDA)) break;
   }
-  if (!found) Serial.println("  (none)");
+  // STOP condition
+  pinMode(PIN_I2C_SDA, OUTPUT);
+  digitalWrite(PIN_I2C_SDA, LOW);
+  delayMicroseconds(5);
+  digitalWrite(PIN_I2C_SCL, HIGH);
+  delayMicroseconds(5);
+  digitalWrite(PIN_I2C_SDA, HIGH);
+  delayMicroseconds(5);
+  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+  Wire.setClock(100000);
+  Wire.setTimeOut(50);
+}
+
+static void i2cProbeKnown(const char *tag) {
+  static const uint8_t kAddrs[] = {I2C_ADDR_ES8311, I2C_ADDR_RTC, I2C_ADDR_NFC};
+  static const char *kNames[] = {"ES8311?", "PCF8563 RTC", "NFC"};
+  Serial.printf("[I2C] probe known (%s)\n", tag);
+  Serial.flush();
+  int found = 0;
+  for (size_t i = 0; i < sizeof(kAddrs); i++) {
+    Serial.printf("  try 0x%02X %s ... ", kAddrs[i], kNames[i]);
+    Serial.flush();
+    const bool ok = i2cAck(kAddrs[i]);
+    Serial.println(ok ? "ACK" : "nack/timeout");
+    Serial.flush();
+    if (ok) found++;
+  }
+  if (!found) Serial.println("  (none of known addrs)");
+  Serial.flush();
 }
 
 static float readBatteryApproxMv() {
@@ -170,29 +199,39 @@ void setup() {
   delay(800);
   printChipInfo();
 
-  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
-  Wire.setClock(100000);
-  i2cScan("rails OFF");
+  // Bring up EPD first so a stuck I2C bus cannot block the status page.
+  Serial.println("[EPD] begin...");
+  Serial.flush();
+  if (!epd.begin(PIN_EPD_SCK, PIN_EPD_MOSI, PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY,
+                 PIN_EPD_PWR)) {
+    Serial.println("[EPD] begin failed — serial-only mode");
+  } else {
+    Serial.println("[EPD] ok");
+  }
+  Serial.flush();
+
+  Serial.println("[I2C] recover + probe...");
+  Serial.flush();
+  i2cBusRecover();
+  i2cProbeKnown("rails OFF");
 
   digitalWrite(PIN_AUDIO_PWR, HIGH);
   digitalWrite(PIN_NFC_PWR, HIGH);
   delay(50);
-  i2cScan("audio+NFC ON");
-
-  if (!epd.begin(PIN_EPD_SCK, PIN_EPD_MOSI, PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY,
-                 PIN_EPD_PWR)) {
-    Serial.println("[EPD] begin failed — serial-only mode");
-    return;
-  }
+  i2cProbeKnown("audio+NFC ON");
 
   const HwStatus s = sampleStatus();
   Serial.printf(
       "BTN B=%d U=%d D=%d | BAT~%.0fmV | CHRG=%d STDBY=%d | RTC=%s NFC=%s ES=%s\n",
       s.boot, s.up, s.down, s.bat_mv, s.chrg, s.stdby, okStr(s.rtc_ok), okStr(s.nfc_ok),
       okStr(s.es_ok));
+  Serial.flush();
 
-  drawStatusPage(s);
-  Serial.println("Screen updated. Short-press BOOT to refresh again.");
+  if (epd.ok()) {
+    drawStatusPage(s);
+    Serial.println("Screen updated. Short-press BOOT to refresh again.");
+  }
+  Serial.flush();
 }
 
 void loop() {
