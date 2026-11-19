@@ -11,7 +11,7 @@
 #define PIN_STDBY      1   // STDBY_H — charge full / standby
 #define PIN_CHRG       2   // CHRG_L  — charging (active LOW typical)
 #define PIN_LED        3
-// NOTE4C 状态灯：GPIO 拉低点亮（anode→3V3，cathode→GPIO）
+// NOTE4C 状态灯：低电平点亮（与官方 board_power_bsp 一致：ON=0 / OFF=1）
 #define LED_ON_LEVEL   LOW
 #define LED_OFF_LEVEL  HIGH
 #define PIN_BAT_ADC    4

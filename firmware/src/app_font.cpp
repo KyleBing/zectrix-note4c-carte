@@ -11,9 +11,11 @@ static size_t g_uni2gb_count = 0;
 static bool g_ready = false;
 
 static constexpr int kLineH = 16;
+static constexpr int kLineHSmall = 10;
 
 bool fontReady() { return g_ready; }
 int fontLineHeight() { return kLineH; }
+int fontLineHeightSmall() { return kLineHSmall; }
 
 static bool loadFile(const char *path, uint8_t **out, size_t expect = 0) {
   File f = LittleFS.open(path, "r");
@@ -150,18 +152,77 @@ static int glyphWidth(uint32_t cp) {
   return 16;
 }
 
+static int glyphWidthSmall(uint32_t cp) {
+  if (cp == '\n' || cp == '\r') return 0;
+  if (cp < 0x80) return 4;
+  return 8;
+}
+
+static void drawAscSmall(EpdSsd2683 &epd, int x, int y, char c, EpdColor fg, EpdColor bg) {
+  if (!g_asc || (uint8_t)c > 127) c = '?';
+  const uint8_t *glyph = g_asc + (uint8_t)c * 16;
+  for (int row = 0; row < 8; row++) {
+    // OR two source rows for denser half-height
+    const uint8_t bits = (uint8_t)(glyph[row * 2] | glyph[row * 2 + 1]);
+    for (int col = 0; col < 4; col++) {
+      const bool on = ((bits & (0x80 >> (col * 2))) != 0) || ((bits & (0x40 >> (col * 2))) != 0);
+      epd.setPixel(x + col, y + row, on ? fg : bg);
+    }
+  }
+}
+
+static void drawHzkSmall(EpdSsd2683 &epd, int x, int y, uint16_t gb, EpdColor fg, EpdColor bg) {
+  if (!g_hzk || gb < 0xA1A1) {
+    epd.drawRect(x, y, 8, 8, fg);
+    return;
+  }
+  const uint8_t hi = (gb >> 8) & 0xFF;
+  const uint8_t lo = gb & 0xFF;
+  if (hi < 0xA1 || lo < 0xA1) {
+    epd.drawRect(x, y, 8, 8, fg);
+    return;
+  }
+  const uint32_t offset = (uint32_t)(94 * (hi - 0xA1) + (lo - 0xA1)) * 32;
+  const uint8_t *m = g_hzk + offset;
+  for (int row = 0; row < 8; row++) {
+    for (int col = 0; col < 8; col++) {
+      const int sr0 = row * 2;
+      const int sr1 = sr0 + 1;
+      const int sc0 = col * 2;
+      const int sc1 = sc0 + 1;
+      auto srcOn = [&](int sr, int sc) -> bool {
+        const uint8_t bits = m[sr * 2 + (sc / 8)];
+        return (bits & (0x80 >> (sc % 8))) != 0;
+      };
+      const bool on = srcOn(sr0, sc0) || srcOn(sr0, sc1) || srcOn(sr1, sc0) || srcOn(sr1, sc1);
+      epd.setPixel(x + col, y + row, on ? fg : bg);
+    }
+  }
+}
+
 int fontDrawTextWrapped(EpdSsd2683 &epd, int x, int y, int max_w, int max_y, const char *utf8,
-                        EpdColor fg, EpdColor bg, int wrap_x) {
+                        EpdColor fg, EpdColor bg, int wrap_x, bool strike, EpdColor strike_color) {
   if (!utf8) return y;
   const int origin_x = (wrap_x >= 0) ? wrap_x : x;
   const int right = origin_x + max_w;
   int cx = x;
   int cy = y;
+  int line_start_x = x;
   bool drew = false;
+  bool line_has_glyph = false;
   const char *p = utf8;
 
+  auto strikeLine = [&]() {
+    if (!strike || !line_has_glyph) return;
+    const int w = cx - line_start_x;
+    if (w > 0) epd.drawHLine(line_start_x, cy + kLineH / 2, w, strike_color);
+  };
+
   auto newline = [&]() {
+    strikeLine();
     cx = origin_x;
+    line_start_x = origin_x;
+    line_has_glyph = false;
     cy += kLineH;
   };
 
@@ -185,6 +246,7 @@ int fontDrawTextWrapped(EpdSsd2683 &epd, int x, int y, int max_w, int max_y, con
     }
 
     drew = true;
+    line_has_glyph = true;
     if (!g_ready) {
       if (cp < 0x80) {
         epd.drawChar(cx, cy + 4, (char)cp, fg, bg);
@@ -206,5 +268,65 @@ int fontDrawTextWrapped(EpdSsd2683 &epd, int x, int y, int max_w, int max_y, con
     }
   }
   if (!drew) return y;
+  strikeLine();
   return cy + kLineH;
+}
+
+int fontDrawTextWrappedSmall(EpdSsd2683 &epd, int x, int y, int max_w, int max_y, const char *utf8,
+                             EpdColor fg, EpdColor bg, int wrap_x) {
+  if (!utf8) return y;
+  const int origin_x = (wrap_x >= 0) ? wrap_x : x;
+  const int right = origin_x + max_w;
+  int cx = x;
+  int cy = y;
+  bool drew = false;
+  const char *p = utf8;
+
+  auto newline = [&]() {
+    cx = origin_x;
+    cy += kLineHSmall;
+  };
+
+  while (*p && cy + kLineHSmall <= max_y) {
+    if (*p == '\r') {
+      p++;
+      continue;
+    }
+    if (*p == '\n') {
+      p++;
+      newline();
+      continue;
+    }
+
+    uint32_t cp = 0;
+    utf8Next(p, cp);
+    const int w = glyphWidthSmall(cp);
+    if (cx + w > right && cx > origin_x) {
+      newline();
+      if (cy + kLineHSmall > max_y) break;
+    }
+
+    drew = true;
+    if (!g_ready) {
+      if (cp < 0x80) {
+        epd.drawChar(cx, cy, (char)cp, fg, bg);
+        cx += 6;
+      } else {
+        epd.drawRect(cx, cy, 8, 8, fg);
+        cx += 8;
+      }
+      continue;
+    }
+
+    if (cp < 0x80) {
+      drawAscSmall(epd, cx, cy, (char)cp, fg, bg);
+      cx += 4;
+    } else {
+      const uint16_t gb = unicodeToGb(cp);
+      drawHzkSmall(epd, cx, cy, gb, fg, bg);
+      cx += 8;
+    }
+  }
+  if (!drew) return y;
+  return cy + kLineHSmall;
 }

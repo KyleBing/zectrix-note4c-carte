@@ -2,6 +2,7 @@
 #include "app_config.h"
 #include "app_font.h"
 #include "app_wifi.h"
+#include "app_battery.h"
 #include "app_version.h"
 
 #include <cstdio>
@@ -77,13 +78,6 @@ static void drawCheckbox(EpdSsd2683 &epd, int x, int y, bool done) {
   }
 }
 
-static void drawStrike(EpdSsd2683 &epd, int x, int y0, int y1, int w) {
-  const int lh = fontLineHeight();
-  for (int yy = y0 + lh / 2; yy < y1; yy += lh) {
-    epd.drawHLine(x, yy, w, EPD_YELLOW);
-  }
-}
-
 void todoDrawPage(EpdSsd2683 &epd, const DiaryDetail &diary, const char *status_line) {
   epd.clear(EPD_WHITE);
 
@@ -102,8 +96,11 @@ void todoDrawPage(EpdSsd2683 &epd, const DiaryDetail &diary, const char *status_
     snprintf(line, sizeof(line), "%d/%d open", undone, n);
     epd.drawText(60, 7, line, EPD_YELLOW, EPD_BLACK);
   }
+  const int bat_left = batteryDrawHeader(epd);  // right: icon + percent
   if (status_line && status_line[0]) {
-    epd.drawText(200, 7, status_line, EPD_YELLOW, EPD_BLACK);
+    // keep status clear of battery widget
+    const int max_status_x = bat_left - 8;
+    if (max_status_x > 160) epd.drawText(160, 7, status_line, EPD_YELLOW, EPD_BLACK);
   }
 
   // Meta
@@ -115,8 +112,9 @@ void todoDrawPage(EpdSsd2683 &epd, const DiaryDetail &diary, const char *status_
     epd.drawText(8, y, line, EPD_BLACK);
     y += 16;
   }
+  y += 3;  // 3px below title
   epd.drawHLine(8, y, 384, EPD_BLACK);
-  y += 4;
+  y += 1 + 3;  // line + 3px above content
 
   constexpr int footer_y = 276;
   constexpr int text_x = 26;
@@ -142,24 +140,25 @@ void todoDrawPage(EpdSsd2683 &epd, const DiaryDetail &diary, const char *status_
       const TodoItem &it = items[i];
       drawCheckbox(epd, box_x, y, it.done);
 
-      String body = it.content;
-      if (it.note.length()) {
-        body += " #";
-        body += it.note;
+      if (it.content.length()) {
+        y = fontDrawTextWrapped(epd, text_x, y, text_w, footer_y - 4, it.content.c_str(), EPD_BLACK,
+                                EPD_WHITE, text_x, it.done, EPD_BLACK);
       }
-      const EpdColor fg = it.done ? EPD_BLACK : EPD_BLACK;
-      const int y0 = y;
-      y = fontDrawTextWrapped(epd, text_x, y, text_w, footer_y - 4, body.c_str(), fg, EPD_WHITE,
-                              text_x);
-      if (it.done) {
-        drawStrike(epd, text_x, y0, y, text_w);
+      // note: normal 16px glyphs, yellow (secondary)
+      if (it.note.length() && y + fontLineHeight() <= footer_y - 4) {
+        y = fontDrawTextWrapped(epd, text_x, y, text_w, footer_y - 4, it.note.c_str(), EPD_RED,
+                                EPD_WHITE, text_x);
       }
-      y += 2;  // gap between items
+      y += 2;  // 2px gap between items
     }
   }
 
   epd.drawHLine(8, footer_y, 384, EPD_BLACK);
   epd.drawText(8, 282, "BOOT:refresh  UP:web  DOWN3s:off", EPD_BLACK);
+  char ver[24];
+  snprintf(ver, sizeof(ver), "%s(%d)", APP_VERSION, APP_BUILD);
+  const int ver_w = (int)strlen(ver) * 6;
+  epd.drawText(400 - 8 - ver_w, 282, ver, EPD_BLACK);
   epd.display();
 }
 
@@ -202,7 +201,7 @@ bool todoRefreshAndDraw(EpdSsd2683 &epd) {
     return false;
   }
 
-  snprintf(status, sizeof(status), "ok v%s", APP_VERSION);
+  snprintf(status, sizeof(status), "ok");
   todoDrawPage(epd, d, status);
   return true;
 }

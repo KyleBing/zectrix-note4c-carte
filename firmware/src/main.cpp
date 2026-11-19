@@ -22,6 +22,7 @@
 #include "app_todo.h"
 #include "app_led.h"
 #include "app_power.h"
+#include "app_battery.h"
 #include "app_version.h"
 
 static EpdSsd2683 epd;
@@ -59,6 +60,7 @@ static void drawConfigWebPage(bool ok, bool forced_ap) {
   epd.clear(EPD_WHITE);
   epd.fillRect(0, 0, 400, 22, EPD_BLACK);
   epd.drawText(8, 7, "CONFIG WEB", EPD_WHITE, EPD_BLACK);
+  batteryDrawHeader(epd);
 
   if (!ok) {
     epd.drawText(8, 40, "Web FAILED", EPD_RED);
@@ -90,7 +92,6 @@ static void drawConfigWebPage(bool ok, bool forced_ap) {
 
 void setup() {
   powerBegin();  // PWR_HOLD high + DOWN pin
-  ledBegin();    // default OFF
 
   pinMode(PIN_BTN_BOOT, INPUT_PULLUP);
   pinMode(PIN_BTN_UP, INPUT_PULLUP);
@@ -106,7 +107,10 @@ void setup() {
 
   Serial.begin(115200);
   delay(600);
-  Serial.printf("======== NOTE4C todo %s ========\n", APP_VERSION);
+  Serial.printf("======== NOTE4C todo %s(%d) ========\n", APP_VERSION, APP_BUILD);
+
+  ledBegin();  // release gpio_hold + force OFF (active-low)
+  batteryBegin();
 
   initAppStorage();
   loadAppConfig();
@@ -127,7 +131,7 @@ void setup() {
 
   ledSet(LedPattern::BlinkSlow);
   todoRefreshAndDraw(epd);
-  ledOff();  // idle: LED must stay off (active-low → GPIO HIGH)
+  ledOff();  // idle OFF (GPIO HIGH); official BSP also uses level=1 for off
 }
 
 void loop() {
@@ -204,12 +208,5 @@ void loop() {
   }
   up_prev = up;
 
-  // Idle / web-ready: keep DoublePulse only while web running; else off
-  if (!busy && webIsRunning() && ledGet() != LedPattern::DoublePulse &&
-      ledGet() != LedPattern::ErrorBurst) {
-    ledSet(LedPattern::DoublePulse);
-  }
-  if (!busy && !webIsRunning() && ledGet() == LedPattern::DoublePulse) {
-    ledOff();
-  }
+  // Web-ready DoublePulse self-clears in ledUpdate(); do not stick it on.
 }
