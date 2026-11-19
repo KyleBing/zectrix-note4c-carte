@@ -7,6 +7,8 @@
 
 #include "epd_ssd2683.h"
 #include "font6x8.h"
+#include "app_power.h"
+#include "app_led.h"
 
 bool EpdSsd2683::begin(int sck, int mosi, int cs, int dc, int rst, int busy, int pwr) {
   pin_cs_ = cs;
@@ -57,6 +59,8 @@ void EpdSsd2683::waitBusy(uint32_t timeout_ms) {
       Serial.println("[EPD] busy timeout");
       break;
     }
+    powerPoll();  // allow DOWN 3s power-off during full refresh
+    ledUpdate();
     delay(20);
   }
 }

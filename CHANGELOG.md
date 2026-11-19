@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.0
+
+- 待办看板：按配置的 diary id 拉取 portal-go 日记并全刷墨水屏
+- Web 配网（STA / AP `note4c`），多 WiFi 档案自动连接
+- Portal 登录鉴权，JWT 落盘；`X-Access-Token` 自动续签
+- LittleFS 中文字库（HZK16 + ASC16 + uni2gb）
+
 ## v0.1.1
 
 - 文档站独立为 `docs/` npm 工程，与 `firmware/` 目录职责分离

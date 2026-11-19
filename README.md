@@ -6,7 +6,7 @@
 
 | 目录 | 内容 |
 | --- | --- |
-| `firmware/` | PlatformIO 固件工程（硬件自检） |
+| `firmware/` | PlatformIO 固件工程（待办看板 + Web 配网） |
 | `docs/` | VitePress 文档站（独立 npm 工程） |
 | `design/` | 图标等设计源文件 |
 
@@ -34,6 +34,7 @@ npm run build
 cd firmware
 pio run                   # 编译
 pio run -t upload         # 刷写（env: note4c）
+pio run -t uploadfs       # 字库 LittleFS（首次必做）
 pio device monitor        # 115200
 ```
 
