@@ -7,7 +7,8 @@ enum class LedPattern : uint8_t {
   Off = 0,
   On,
   BlinkSlow,   // WiFi connecting
-  BlinkFast,   // network fetch / EPD busy
+  BlinkFast,   // network fetch
+  Breathe,     // EPD page refresh
   DoublePulse, // config web / AP ready
   ErrorBurst,  // failure
 };
@@ -17,3 +18,5 @@ void ledSet(LedPattern pattern);
 LedPattern ledGet();
 void ledUpdate();  // call from loop()
 void ledOff();
+// Distinctive blink even while a key is still held (long-press threshold reached).
+void ledAckFlash();

@@ -59,7 +59,7 @@ void EpdSsd2683::waitBusy(uint32_t timeout_ms) {
       Serial.println("[EPD] busy timeout");
       break;
     }
-    powerPoll();  // allow DOWN 3s power-off during full refresh
+    powerPoll(false);  // power-off only; do not latch DOWN shorts during refresh
     ledUpdate();
     delay(20);
   }
@@ -189,6 +189,7 @@ void EpdSsd2683::drawText(int x, int y, const char *text, EpdColor fg, EpdColor 
 
 bool EpdSsd2683::display() {
   if (!ok_ || !fb_) return false;
+  powerIdleTouch();
   Serial.println("[EPD] full refresh start (may take 10s+)");
   const uint32_t t0 = millis();
 

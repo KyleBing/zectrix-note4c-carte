@@ -1,7 +1,7 @@
 #pragma once
 
-// Semver: bump patch by 0.0.1 per release. Display: 0.0.1(3) where (n) is build.
-static constexpr const char *APP_VERSION = "0.0.1";
-static constexpr int APP_BUILD = 3;
+// Semver: bump patch by 0.0.1 per release. Display: 0.0.3(5) where (n) is build.
+static constexpr const char *APP_VERSION = "0.0.16";
+static constexpr int APP_BUILD = 18;
 static constexpr const char *APP_UPDATE_TIME = __DATE__ " " __TIME__;
 static constexpr const char *APP_AUTHOR = "KyleBing";

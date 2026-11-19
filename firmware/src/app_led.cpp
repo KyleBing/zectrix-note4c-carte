@@ -34,6 +34,18 @@ void ledOff() {
   ledWrite(false);
 }
 
+void ledAckFlash() {
+  // Key-hold path keeps the LED solid on; two dark pulses cut through that.
+  for (int i = 0; i < 2; i++) {
+    g_last_level = -1;
+    ledWrite(false);
+    delay(70);
+    g_last_level = -1;
+    ledWrite(true);
+    delay(70);
+  }
+}
+
 void ledSet(LedPattern pattern) {
   if (g_pat == pattern) return;
   g_pat = pattern;
@@ -49,6 +61,13 @@ void ledSet(LedPattern pattern) {
 LedPattern ledGet() { return g_pat; }
 
 void ledUpdate() {
+  // Any key held: LED solid on until release (overrides pattern).
+  if (digitalRead(PIN_BTN_BOOT) == LOW || digitalRead(PIN_BTN_UP) == LOW ||
+      digitalRead(PIN_BTN_DOWN) == LOW) {
+    ledWrite(true);
+    return;
+  }
+
   const uint32_t elapsed = millis() - g_t0;
 
   switch (g_pat) {
@@ -64,6 +83,16 @@ void ledUpdate() {
     case LedPattern::BlinkFast:
       ledWrite(((elapsed / 120) % 2) == 0);
       break;
+    case LedPattern::Breathe: {
+      const uint32_t period = 1600;
+      uint32_t t = elapsed % period;
+      if (t > period / 2) t = period - t;
+      const uint32_t frame = 16;
+      const uint32_t on = (t * frame) / (period / 2);
+      const uint32_t phase = millis() % frame;
+      ledWrite(on > 0 && phase < on);
+      break;
+    }
     case LedPattern::DoublePulse: {
       // ~3 double-pulses then auto-off (web-ready cue, not sticky)
       if (elapsed > 3000) {

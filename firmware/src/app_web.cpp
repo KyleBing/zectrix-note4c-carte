@@ -3,8 +3,11 @@
 #include "app_wifi.h"
 #include "app_diary.h"
 #include "app_todo.h"
-#include "app_battery.h"
+#include "app_weather.h"
+#include "app_web_album.h"
+#include "app_album.h"
 #include "app_version.h"
+#include "app_power.h"
 
 #include <WebServer.h>
 #include <WiFi.h>
@@ -17,7 +20,7 @@ static bool g_running = false;
 static bool g_ap = false;
 static char g_url[40] = "";
 
-enum class NavTab : uint8_t { Status, Wifi, Auth, Todo };
+enum class NavTab : uint8_t { Status, Wifi, Auth, Todo, Weather, Album };
 
 static const char *kCss = R"CSS(
 *{box-sizing:border-box}
@@ -30,14 +33,6 @@ header nav{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0}
 header nav a{display:inline-block;padding:5px 12px;border-radius:999px;font-size:13px;line-height:1.2;color:rgba(255,255,255,.55);text-decoration:none;border:1px solid transparent;background:transparent;transition:background .15s,color .15s,border-color .15s}
 header nav a:hover{color:#fff;background:rgba(255,255,255,.08)}
 header nav a.active{background:#ffcc00;color:#111;border-color:#ffcc00;font-weight:650}
-header .bat{display:inline-flex;align-items:center;gap:7px;margin-left:auto;flex-shrink:0;font-size:12px;color:rgba(255,255,255,.85);user-select:none}
-header .bat.chg{color:#7dffa0}
-header .bat.full{color:#ffcc00}
-header .bat-bolt{font-size:11px;line-height:1;opacity:.95}
-header .bat-icon{position:relative;width:26px;height:12px;border:1.5px solid currentColor;border-radius:2px;box-sizing:border-box}
-header .bat-icon::after{content:"";position:absolute;right:-4px;top:2px;width:2px;height:6px;background:currentColor;border-radius:0 1px 1px 0}
-header .bat-icon i{display:block;height:100%;background:currentColor;border-radius:1px}
-header .bat-pct{font-variant-numeric:tabular-nums;font-weight:650;min-width:2.6em}
 main{max-width:720px;margin:16px auto;padding:0 16px 28px}
 section{display:block;background:#fff;border-radius:12px;padding:18px 16px;margin-bottom:14px;box-shadow:0 1px 2px rgba(0,0,0,.05)}
 h2{font-size:15px;margin:0 0 14px;font-weight:650}
@@ -47,8 +42,8 @@ h2{font-size:15px;margin:0 0 14px;font-weight:650}
 .flash.ok{background:#e8f7ef;color:#0a7a4b}
 .flash.err{background:#fdecec;color:#b42318}
 label{display:block;font-size:12px;margin:12px 0 5px;color:#555;font-weight:500}
-input,textarea{width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;background:#fafafa}
-input:focus,textarea:focus{outline:0;border-color:#1a1a1a;background:#fff}
+input,textarea,select{width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;background:#fafafa}
+input:focus,textarea:focus,select:focus{outline:0;border-color:#1a1a1a;background:#fff}
 .btn-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
 button,.btn{background:#1a1a1a;color:#fff;border:0;border-radius:8px;padding:11px 16px;font-size:14px;cursor:pointer}
 button.secondary{background:#5c5c5c}
@@ -86,6 +81,88 @@ pre{white-space:pre-wrap;background:#f7f7f5;padding:12px;border-radius:8px;font-
 .todo-list li.done .txt{color:#999;text-decoration:line-through}
 .todo-list .note{display:block;margin-top:4px;font-size:12px;color:#c9a000;text-decoration:none}
 .meta{font-size:12px;color:#888;margin:0 0 12px}
+.geo-list{list-style:none;padding:0;margin:12px 0 0}
+.geo-list li{padding:10px 0;border-bottom:1px solid #f0f0f0}
+.geo-list li:last-child{border-bottom:0}
+.geo-list label{display:flex;gap:10px;align-items:flex-start;margin:0;cursor:pointer;color:#1a1a1a;font-size:14px;font-weight:500}
+.geo-list input{width:auto;margin:3px 0 0;accent-color:#1a1a1a}
+.geo-list .sub{display:block;margin-top:2px;font-size:12px;color:#888;font-weight:400}
+body.page-album{overflow-x:hidden;overflow-y:auto;min-height:100vh;background:#e8e6e0}
+body.page-album main{max-width:none;width:100%;margin:0;padding:0;display:block}
+.ed-shell{display:flex;flex-direction:column;min-width:0;background:#fff}
+.ed-work{display:flex;flex-direction:column;height:auto;overflow:visible;border-bottom:1px solid #d0cec8}
+.ed-toolbar{display:flex;flex-wrap:nowrap;gap:8px;align-items:center;background:#fff;border-bottom:1px solid #d0cec8;padding:6px 10px;flex:0 0 auto;overflow-x:auto}
+.ed-sep{width:1px;height:28px;background:#d0cec8;flex-shrink:0}
+.ed-tool-group{display:flex;flex-wrap:nowrap;gap:4px;align-items:center;flex-shrink:0}
+.ed-paint{gap:6px}
+.ed-erase-sz{display:flex;align-items:center;gap:6px;padding:2px 8px;background:#f3f2ee;min-width:140px}
+.ed-erase-sz span{font-size:12px;color:#555;white-space:nowrap}
+.ed-erase-sz input[type=range]{flex:1;padding:0;border:0;accent-color:#1a1a1a;min-width:72px}
+.ed-erase-sz em{font-style:normal;font-size:12px;color:#888;width:20px;text-align:right}
+.ed-toolbar button{padding:7px 10px;font-size:12px;border-radius:0;background:#eceae4;color:#1a1a1a;white-space:nowrap}
+.ed-toolbar button.on,.ed-map-bar>button.on{background:#1a1a1a;color:#fff;box-shadow:none}
+.ed-body{flex:0 0 auto;display:grid;grid-template-columns:1fr;min-width:0;overflow:visible;align-items:stretch}
+@media(min-width:960px){.ed-body{grid-template-columns:minmax(0,1fr) 232px}}
+.ed-pair{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto 48px;min-height:0;height:auto;overflow:hidden;background:#fff}
+.ed-stage{position:relative;min-width:0;line-height:0;overflow:hidden;display:flex;align-items:flex-start;justify-content:center;background:#f0eee8;padding:8px 22px 6px;grid-row:1}
+.ed-stage:nth-child(2){border-left:1px solid #d0cec8}
+.ed-fit{position:relative;aspect-ratio:4/3;width:90%;max-width:90%;height:auto;line-height:0;flex-shrink:0;overflow:hidden}
+.ed-can,.ed-cur{position:absolute;inset:0;width:100%;height:100%;image-rendering:pixelated;border:1px solid #ccc;background:#fff;touch-action:none;display:block}
+.ed-can{cursor:grab}
+.ed-cur{pointer-events:none;border:0;background:transparent}
+#pvStage .ed-fit{overflow:auto}
+.ed-zoom{position:absolute;inset:0;width:100%;height:100%}
+.ed-toast{position:fixed;top:56px;left:50%;transform:translate(-50%,-12px);background:#0a7a4b;color:#fff;padding:12px 24px;font-size:16px;font-weight:700;z-index:80;opacity:0;pointer-events:none;box-shadow:0 8px 28px rgba(0,0,0,.22);transition:opacity .18s,transform .18s;letter-spacing:.02em}
+.ed-toast.show{opacity:1;transform:translate(-50%,0)}
+.ed-toast.err{background:#b42318}
+#loupe{position:absolute;width:96px;height:96px;border:2px solid #111;image-rendering:pixelated;background:#fff;pointer-events:none;display:none;box-shadow:0 4px 16px rgba(0,0,0,.25);z-index:2}
+.ed-foot{display:flex;flex-wrap:nowrap;align-items:center;gap:6px;height:48px;padding:0 8px;overflow:visible;border-top:1px solid #d0cec8;grid-row:2;background:#fff}
+.ed-foot:last-child{border-left:1px solid #d0cec8}
+.ed-foot h3{margin:0;font-size:12px;font-weight:650;flex-shrink:0}
+.ed-foot button{border-radius:0;padding:6px 10px;font-size:12px}
+.ed-foot .meta{margin:0;font-size:11px;color:#888;min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ed-side{background:#fff;padding:8px 10px;overflow:auto;min-height:0;border-left:1px solid #d0cec8;display:flex;flex-direction:column;gap:8px;align-self:stretch}
+.ed-side-h{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.ed-side-h h3{margin:0;font-size:13px;font-weight:650}
+.ed-side button{padding:4px 8px;font-size:12px;border-radius:0}
+.ed-block{padding:0}
+.ed-map-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ed-help{margin:auto 0 0;font-size:11px;line-height:1.35}
+.hist-wrap{position:relative;user-select:none}
+#hist{width:100%;height:88px;display:block;background:#3d3d3d;cursor:ew-resize}
+.hist-read{display:flex;justify-content:space-between;font-size:11px;color:#888;margin-top:2px;font-variant-numeric:tabular-nums}
+.ed-row{display:flex;align-items:center;gap:6px;margin:4px 0}
+.ed-row span{flex:0 0 36px;font-size:12px;color:#555}
+.ed-row input[type=range]{flex:1;padding:0;border:0;background:transparent;accent-color:#1a1a1a}
+.ed-row em{flex:0 0 36px;font-style:normal;font-size:11px;color:#888;text-align:right}
+.pal-sw{display:inline-flex;align-items:center;gap:12px;margin:0;padding:4px 2px;border:0;flex-shrink:0}
+.pal-sw button,.ed-toolbar .pal-sw button{width:16px;height:16px;padding:0;margin:0;border-radius:50%;border:1px solid rgba(0,0,0,.4);font-size:0;line-height:0;cursor:pointer;box-shadow:none;outline:none;flex-shrink:0}
+.pal-sw button.on,.ed-toolbar .pal-sw button.on{outline:none;box-shadow:0 0 0 2px #fff,0 0 0 4px #111;background-image:none}
+.pal-sw button.pal-k,.ed-toolbar .pal-sw button.pal-k{background:#111;border-color:#111}
+.pal-sw button.pal-w,.ed-toolbar .pal-sw button.pal-w{background:#fff;border-color:#888}
+.pal-sw button.pal-y,.ed-toolbar .pal-sw button.pal-y{background:#F6C749;border-color:#c9a02a}
+.pal-sw button.pal-r,.ed-toolbar .pal-sw button.pal-r{background:#701B0E;border-color:#4a1209}
+.rules{font-size:11px;margin:4px 0 0;max-height:72px;overflow:hidden}
+.rules .item{display:flex;align-items:center;gap:6px;padding:3px 0}
+.sw{width:14px;height:14px;border:1px solid #ccc;flex-shrink:0}
+.ed-album{padding:14px 12px 24px;background:#f0eee8;flex:0 0 auto}
+.ed-album-h{display:flex;align-items:baseline;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.ed-album-h h2{margin:0;font-size:14px}
+.ed-saved{display:flex;flex-direction:column;gap:8px;overflow:visible;padding-bottom:4px}
+.thumb{display:flex;flex-wrap:wrap;align-items:center;gap:10px;border:1px solid #ccc;padding:8px;background:#fff;width:auto;max-width:100%;box-sizing:border-box}
+.thumb.on{border-color:#111;outline:1px solid #111}
+.thumb.off{opacity:.45}
+.thumb canvas{width:200px;max-width:100%;height:auto;aspect-ratio:4/3;image-rendering:pixelated;display:block;background:#fff;cursor:pointer;flex:0 0 auto}
+.thumb .row{display:flex;align-items:center;gap:4px;margin:0;flex:1;min-width:180px;flex-wrap:wrap}
+.thumb .row code{font-size:10px}
+.show-lab{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:#555;cursor:pointer;user-select:none}
+.show-lab input{width:auto;margin:0;accent-color:#1a1a1a;padding:0}
+.file-pick{display:flex;flex-direction:row;align-items:center;gap:8px;margin:0;flex-shrink:0}
+.file-cta{position:relative;display:flex;align-items:center;justify-content:center;height:36px;padding:0 16px;background:#1a1a1a;color:#fff;font-size:14px;font-weight:700;cursor:pointer;border:0;overflow:hidden;letter-spacing:.02em}
+.file-cta:hover{background:#333}
+.file-cta input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;padding:0;border:0;margin:0}
+.file-name{display:block;font-size:11px;line-height:1.3;color:#555;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-name.empty{color:#aaa}
 )CSS";
 
 static String htmlEscapeAttr(const char *s) {
@@ -110,33 +187,6 @@ static void appendNavLink(String &page, NavTab tab, NavTab active, const char *h
   page += F("</a>");
 }
 
-static void appendBatteryWidget(String &page) {
-  const BatteryStatus bat = batteryRead();
-  page += F("<div class='bat");
-  if (bat.charge == BatteryCharge::Charging) page += F(" chg");
-  else if (bat.charge == BatteryCharge::Full) page += F(" full");
-  page += F("' title='");
-  if (bat.ok) {
-    page += String(bat.mv);
-    page += F(" mV · ");
-    page += batteryChargeLabel(bat.charge);
-  } else {
-    page += F("电池未读到");
-  }
-  page += F("'>");
-  if (bat.charge == BatteryCharge::Charging) page += F("<span class=bat-bolt>⚡</span>");
-  page += F("<span class=bat-icon><i style=width:");
-  page += String(bat.ok ? bat.percent : 0);
-  page += F("%></i></span><span class=bat-pct>");
-  if (bat.ok) {
-    page += String(bat.percent);
-    page += F("%");
-  } else {
-    page += F("--");
-  }
-  page += F("</span></div>");
-}
-
 static void sendHtml(const String &title, NavTab active, const String &body) {
   String page;
   page.reserve(body.length() + 2000);
@@ -146,7 +196,9 @@ static void sendHtml(const String &title, NavTab active, const String &body) {
   page += title;
   page += F("</title><style>");
   page += kCss;
-  page += F("</style></head><body><header>"
+  page += F("</style></head><body");
+  if (active == NavTab::Album) page += F(" class=page-album");
+  page += F("><header>"
             "<div class=brand>"
             "<img class=site-logo src=/favicon.svg alt='' width=28 height=28>"
             "<h1>NOTE4C</h1></div><nav>");
@@ -154,9 +206,9 @@ static void sendHtml(const String &title, NavTab active, const String &body) {
   appendNavLink(page, NavTab::Wifi, active, "/wifi", "WiFi");
   appendNavLink(page, NavTab::Auth, active, "/auth", "鉴权");
   appendNavLink(page, NavTab::Todo, active, "/todo", "待办");
-  page += F("</nav>");
-  appendBatteryWidget(page);
-  page += F("</header><main>");
+  appendNavLink(page, NavTab::Weather, active, "/weather", "天气");
+  appendNavLink(page, NavTab::Album, active, "/album", "相册");
+  page += F("</nav></header><main>");
   page += body;
   page += F("</main></body></html>");
   g_server.send(200, "text/html; charset=utf-8", page);
@@ -172,7 +224,6 @@ static void kvRow(String &b, const char *k, const String &v) {
 
 static void handleRoot() {
   const AppConfig &cfg = getAppConfig();
-  const BatteryStatus bat = batteryRead();
   String b;
   b += F("<section><div class=status-hero><div>");
   if (wifiIsStaConnected()) {
@@ -187,13 +238,6 @@ static void handleRoot() {
   b += F("(");
   b += String(APP_BUILD);
   b += F(")</div></div><dl class=kv>");
-  if (bat.ok) {
-    String bat_line = String(bat.percent) + "% · " + String(bat.mv) + " mV · " +
-                      batteryChargeLabel(bat.charge);
-    kvRow(b, "电池", bat_line);
-  } else {
-    kvRow(b, "电池", String("未读到（检查 ADC）"));
-  }
   kvRow(b, "模式", String(webModeName()));
   kvRow(b, "地址", String(g_url));
   if (wifiIsStaConnected()) {
@@ -211,8 +255,71 @@ static void handleRoot() {
     kvRow(b, "Token", String("<span class='pill off'>未登录</span>"));
   }
   kvRow(b, "Diary", String(cfg.diary_id[0] ? cfg.diary_id : "—"));
+  if (qweatherConfigured()) {
+    String loc = String(cfg.qweather_location_name[0] ? cfg.qweather_location_name : cfg.qweather_location_id);
+    loc += " · via Portal";
+    kvRow(b, "天气", loc);
+  } else if (cfg.qweather_enabled) {
+    kvRow(b, "天气", String("<span class='pill warn'>需登录 + 选择位置</span>"));
+  } else {
+    kvRow(b, "天气", String("<span class='pill off'>关闭</span>"));
+  }
+  {
+    AlbumList al;
+    albumList(al);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%d / %d", al.count, ALBUM_MAX);
+    kvRow(b, "相册", String(buf));
+    kvRow(b, "相册标题栏", String(cfg.album_show_header ? "显示" : "隐藏"));
+  }
+  {
+    char idle[40];
+    if (cfg.idle_off_sec == 0) {
+      snprintf(idle, sizeof(idle), "关闭");
+    } else {
+      snprintf(idle, sizeof(idle), "%u 秒", (unsigned)cfg.idle_off_sec);
+    }
+    kvRow(b, "自动关机", String(idle));
+  }
   b += F("</dl></section>");
+
+  b += F("<section><h2>电源</h2>"
+         "<p class=hint>无操作自动关机是本固件自己的计时，不是芯片默认。按下任意键会重新计时。"
+         "开启 Web 配置期间不会自动关机，方便慢慢配网。</p>"
+         "<form method=POST action=/power>"
+         "<label>无操作自动关机</label>"
+         "<select name=idle_off_sec>");
+  const uint32_t idle_opts[] = {0, 60, 180, 300, 600, 900};
+  const char *idle_labs[] = {"关闭", "1 分钟", "3 分钟", "5 分钟", "10 分钟", "15 分钟"};
+  bool idle_hit = false;
+  for (int i = 0; i < 6; i++) {
+    b += F("<option value=");
+    b += String(idle_opts[i]);
+    if (cfg.idle_off_sec == idle_opts[i]) {
+      b += F(" selected");
+      idle_hit = true;
+    }
+    b += F(">");
+    b += idle_labs[i];
+    b += F("</option>");
+  }
+  if (!idle_hit) {
+    b += F("<option value=");
+    b += String(cfg.idle_off_sec);
+    b += F(" selected>当前 ");
+    b += String(cfg.idle_off_sec);
+    b += F(" 秒</option>");
+  }
+  b += F("</select><div class=btn-row><button type=submit>保存电源设置</button></div></form></section>");
   sendHtml("状态", NavTab::Status, b);
+}
+
+static void handlePowerPost() {
+  const uint32_t sec = (uint32_t)g_server.arg("idle_off_sec").toInt();
+  saveIdleOffSec(sec);
+  powerIdleSetTimeoutSec(sec);
+  g_server.sendHeader("Location", "/");
+  g_server.send(303);
 }
 
 static void handleWifiGet() {
@@ -273,13 +380,21 @@ static void handleWifiPost() {
     active_ssid = arr[0]["ssid"].as<String>();
   }
   doc["wifi_active"] = active_ssid;
-  // preserve portal
+  // preserve portal + qweather
   const AppConfig &cfg = getAppConfig();
   JsonObject portal = doc["portal"].to<JsonObject>();
   portal["base_url"] = cfg.portal_base_url;
   portal["email"] = cfg.portal_email;
   portal["token"] = cfg.portal_token;
   portal["diary_id"] = cfg.diary_id;
+  JsonObject qw = doc["qweather"].to<JsonObject>();
+  qw["enabled"] = cfg.qweather_enabled;
+  qw["host"] = cfg.qweather_host;
+  qw["key"] = cfg.qweather_key;
+  qw["location_id"] = cfg.qweather_location_id;
+  qw["location_name"] = cfg.qweather_location_name;
+  doc["idle_off_sec"] = cfg.idle_off_sec;
+  doc["album_show_header"] = cfg.album_show_header;
 
   String json;
   serializeJson(doc, json);
@@ -428,6 +543,126 @@ static void handleTodoPost() {
   sendHtml("待办", NavTab::Todo, b);
 }
 
+static void appendWeatherForm(String &b, const AppConfig &cfg, const WeatherGeoResult *geo,
+                              const char *flash_html) {
+  if (flash_html && flash_html[0]) b += flash_html;
+  b += F("<section><h2>天气位置</h2>");
+  b += F("<p class=hint>设备经 <strong>Portal</strong> 拉天气（<code>/weather/*</code>），"
+         "和风 JWT/Key 在服务器配置。请先在「鉴权」登录，再用下方搜索选位置。</p>");
+  b += F("<form method=POST action=/weather>");
+  b += F("<label><input type=checkbox name=enabled value=1");
+  if (cfg.qweather_enabled) b += F(" checked");
+  b += F("> 启用天气</label>");
+  b += F("<label>当前 LocationID</label><input name=location_id value=\"");
+  b += htmlEscapeAttr(cfg.qweather_location_id);
+  b += F("\" readonly>");
+  b += F("<label>位置名称</label><input name=location_name value=\"");
+  b += htmlEscapeAttr(cfg.qweather_location_name);
+  b += F("\" readonly>");
+  b += F("<div class=btn-row><button type=submit name=action value=save>保存开关</button></div>");
+  b += F("</form></section>");
+
+  b += F("<section><h2>搜索位置</h2>");
+  b += F("<p class=hint>经 Portal <code>/weather/geo</code> 调和风城市搜索；需 STA + 已登录。</p>");
+  b += F("<form method=POST action=/weather>");
+  b += F("<label>城市 / 区县名</label><input name=geo_query placeholder=\"例如 杭州 或 西湖\">");
+  b += F("<div class=btn-row><button type=submit name=action value=search>搜索</button></div>");
+  b += F("</form>");
+
+  if (geo && geo->ok && geo->count > 0) {
+    b += F("<form method=POST action=/weather><ul class=geo-list>");
+    for (int i = 0; i < geo->count; i++) {
+      const WeatherGeoItem &it = geo->items[i];
+      b += F("<li><label><input type=radio name=pick value=\"");
+      b += htmlEscapeAttr(it.id.c_str());
+      if (i == 0) b += F("\" checked");
+      else b += F("\"");
+      b += F("><span><strong>");
+      String name = it.name;
+      name.replace("&", "&amp;");
+      name.replace("<", "&lt;");
+      b += name;
+      b += F("</strong> <code>");
+      b += it.id;
+      b += F("</code><span class=sub>");
+      String sub = it.adm1;
+      if (it.adm2.length()) {
+        sub += " · ";
+        sub += it.adm2;
+      }
+      if (it.country.length()) {
+        sub += " · ";
+        sub += it.country;
+      }
+      sub.replace("&", "&amp;");
+      sub.replace("<", "&lt;");
+      b += sub;
+      b += F("</span></span></label>");
+      // stash name in hidden field keyed by id
+      b += F("<input type=hidden name=name_");
+      b += it.id;
+      b += F(" value=\"");
+      b += htmlEscapeAttr(it.name.c_str());
+      b += F("\">");
+      b += F("</li>");
+    }
+    b += F("</ul><div class=btn-row>"
+           "<button type=submit name=action value=pick>选用所选位置</button></div></form>");
+  } else if (geo && !geo->ok && geo->message.length()) {
+    b += F("<div class='flash err'>");
+    b += geo->message;
+    b += F("</div>");
+  }
+  b += F("</section>");
+}
+
+static void handleWeatherGet() {
+  String b;
+  appendWeatherForm(b, getAppConfig(), nullptr, nullptr);
+  sendHtml("天气", NavTab::Weather, b);
+}
+
+static void handleWeatherPost() {
+  const String action = g_server.arg("action");
+  String flash;
+  WeatherGeoResult geo;
+
+  if (action == "save") {
+    const bool enabled = g_server.hasArg("enabled");
+    const AppConfig &cfg = getAppConfig();
+    saveQWeatherConfig(enabled, cfg.qweather_host, cfg.qweather_key, cfg.qweather_location_id,
+                       cfg.qweather_location_name);
+    flash = F("<div class='flash ok'>天气开关已保存</div>");
+  } else if (action == "search") {
+    const String q = g_server.arg("geo_query");
+    if (!weatherGeoLookup(q.c_str(), geo)) {
+      // geo.message already set
+    }
+  } else if (action == "pick") {
+    const String id = g_server.arg("pick");
+    const String name_key = String("name_") + id;
+    const String name = g_server.hasArg(name_key) ? g_server.arg(name_key) : id;
+    const AppConfig &cfg = getAppConfig();
+    saveQWeatherConfig(true, cfg.qweather_host, cfg.qweather_key, id.c_str(), name.c_str());
+    flash = F("<div class='flash ok'>已选用位置 ");
+    flash += name;
+    flash += F("（");
+    flash += id;
+    flash += F("）</div>");
+  }
+
+  String b;
+  appendWeatherForm(b, getAppConfig(), (action == "search") ? &geo : nullptr, flash.c_str());
+  sendHtml("天气", NavTab::Weather, b);
+}
+
+static void handleAlbumGet() {
+  albumEnsureDir();
+  String b;
+  webAlbumAppendPage(b);
+  sendHtml("相册", NavTab::Album, b);
+}
+
 static void handleApiConfigGet() {
   g_server.send(200, "application/json", appConfigToJson(true));
 }
@@ -444,6 +679,7 @@ static void handleFavicon() {
 
 static void registerRoutes() {
   g_server.on("/", HTTP_GET, handleRoot);
+  g_server.on("/power", HTTP_POST, handlePowerPost);
   g_server.on("/favicon.svg", HTTP_GET, handleFavicon);
   g_server.on("/wifi", HTTP_GET, handleWifiGet);
   g_server.on("/wifi", HTTP_POST, handleWifiPost);
@@ -451,6 +687,10 @@ static void registerRoutes() {
   g_server.on("/auth", HTTP_POST, handleAuthPost);
   g_server.on("/todo", HTTP_GET, handleTodoGet);
   g_server.on("/todo", HTTP_POST, handleTodoPost);
+  g_server.on("/weather", HTTP_GET, handleWeatherGet);
+  g_server.on("/weather", HTTP_POST, handleWeatherPost);
+  g_server.on("/album", HTTP_GET, handleAlbumGet);
+  webAlbumRegisterRoutes(g_server);
   g_server.on("/api/config", HTTP_GET, handleApiConfigGet);
 }
 

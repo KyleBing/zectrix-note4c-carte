@@ -20,6 +20,6 @@ void batteryBegin();
 BatteryStatus batteryRead();
 const char *batteryChargeLabel(BatteryCharge c);
 
-// Cardputer-style header battery: icon + percent on black bar (right-aligned).
+// Header battery icon only (no percent text) on black bar, right-aligned.
 // Returns leftmost x used (so callers can avoid overlap).
 int batteryDrawHeader(EpdSsd2683 &epd, int right_x = 392, int y = 5);

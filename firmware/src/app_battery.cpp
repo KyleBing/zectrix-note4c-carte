@@ -88,17 +88,9 @@ static void drawBolt(EpdSsd2683 &epd, int x, int y, EpdColor fg) {
 }
 
 int batteryDrawHeader(EpdSsd2683 &epd, int right_x, int y) {
+  // Icon only (no percent) — cleaner for device photos / screenshots.
   const BatteryStatus bat = batteryRead();
   const EpdColor accent = EPD_WHITE;
-
-  char pct[8];
-  if (bat.ok) snprintf(pct, sizeof(pct), "%d%%", bat.percent);
-  else snprintf(pct, sizeof(pct), "--%%");
-
-  // 6x8 font used by drawText
-  const int text_w = (int)strlen(pct) * 6;
-  const int text_x = right_x - text_w;
-  epd.drawText(text_x, y + 2, pct, accent, EPD_BLACK);
 
   // Battery body (cardputer-like: head on left, 5 segments)
   // inner = 5*3 + 4*1 = 19 → body_w = 19 + 2*inset = 23
@@ -106,14 +98,13 @@ int batteryDrawHeader(EpdSsd2683 &epd, int right_x, int y) {
   constexpr int body_h = 12;
   constexpr int head_w = 2;
   constexpr int head_h = 6;
-  constexpr int gap = 3;
   constexpr int segs = 5;
   constexpr int seg_w = 3;
   constexpr int seg_h = 8;
   constexpr int seg_gap = 1;
   constexpr int inset = 2;
 
-  int icon_right = text_x - gap;
+  int icon_right = right_x;
   const bool charging = bat.charge == BatteryCharge::Charging;
   if (charging) {
     drawBolt(epd, icon_right - 7, y + 1, accent);

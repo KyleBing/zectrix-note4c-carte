@@ -30,14 +30,33 @@ npm run build
 
 ## 固件
 
+芯片 ESP32-S3 **16 MB Flash**，分区表 `default_16MB.csv`。详情与刷写地址见 [firmware/README.md](firmware/README.md)。
+
 ```bash
+./flash.sh                # 编译并刷固件（推荐）
+./flash.sh all            # 固件 + LittleFS 字库（首次）
+./flash.sh mon            # 串口 115200
+
+# 或手动：
 cd firmware
 pio run                   # 编译
-pio run -t upload         # 刷写（env: note4c）
-pio run -t uploadfs       # 字库 LittleFS（首次必做）
+pio run -t upload         # 刷写（env: note4c）→ app @ 0x10000
+pio run -t uploadfs       # 字库 LittleFS @ 0xC90000（首次必做）
 pio device monitor        # 115200
 ```
 
+| 区 | 地址 | 大小 |
+| --- | --- | --- |
+| bootloader | `0x0` | 32 KB |
+| 分区表 | `0x8000` | 4 KB |
+| nvs | `0x9000` | 20 KB |
+| otadata | `0xE000` | 8 KB |
+| **app0（固件）** | **`0x10000`** | **6.25 MiB** |
+| app1（OTA 备用） | `0x650000` | 6.25 MiB |
+| **LittleFS（字库/相册）** | **`0xC90000`** | **3.375 MiB** |
+| coredump | `0xFF0000` | 64 KB |
+
+整片 `0x1000000`（16 MiB）。
 ## Release
 
 推送 `v*` tag 后，GitHub Actions 会编译固件、发布 Release，并触发文档部署。

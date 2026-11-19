@@ -3,6 +3,7 @@
 #include "app_font.h"
 #include "app_wifi.h"
 #include "app_battery.h"
+#include "app_header.h"
 #include "app_version.h"
 
 #include <cstdio>
@@ -88,18 +89,15 @@ void todoDrawPage(EpdSsd2683 &epd, const DiaryDetail &diary, const char *status_
     if (!items[i].done) undone++;
   }
 
-  // Header
-  epd.fillRect(0, 0, 400, 22, EPD_BLACK);
-  epd.drawText(8, 7, "TODO", EPD_WHITE, EPD_BLACK);
+  // Header + app slot n/N (near battery)
+  const int bat_left = headerDrawAppBar(epd, AppId::Todo, "TODO");
   char line[48];
   if (n > 0) {
     snprintf(line, sizeof(line), "%d/%d open", undone, n);
-    epd.drawText(60, 7, line, EPD_YELLOW, EPD_BLACK);
+    epd.drawText(56, 7, line, EPD_YELLOW, EPD_BLACK);
   }
-  const int bat_left = batteryDrawHeader(epd);  // right: icon + percent
   if (status_line && status_line[0]) {
-    // keep status clear of battery widget
-    const int max_status_x = bat_left - 8;
+    const int max_status_x = bat_left - 40;
     if (max_status_x > 160) epd.drawText(160, 7, status_line, EPD_YELLOW, EPD_BLACK);
   }
 
@@ -144,17 +142,18 @@ void todoDrawPage(EpdSsd2683 &epd, const DiaryDetail &diary, const char *status_
         y = fontDrawTextWrapped(epd, text_x, y, text_w, footer_y - 4, it.content.c_str(), EPD_BLACK,
                                 EPD_WHITE, text_x, it.done, EPD_BLACK);
       }
-      // note: normal 16px glyphs, yellow (secondary)
+      // note: 2px below main todo text; red
       if (it.note.length() && y + fontLineHeight() <= footer_y - 4) {
+        y += 2;
         y = fontDrawTextWrapped(epd, text_x, y, text_w, footer_y - 4, it.note.c_str(), EPD_RED,
                                 EPD_WHITE, text_x);
       }
-      y += 2;  // 2px gap between items
+      y += 4;  // 4px gap between todo items
     }
   }
 
   epd.drawHLine(8, footer_y, 384, EPD_BLACK);
-  epd.drawText(8, 282, "BOOT:refresh  UP:web  DOWN3s:off", EPD_BLACK);
+  epd.drawText(8, 282, "BOOT:refresh  DN:next  UP:prev  hold:web/off", EPD_BLACK);
   char ver[24];
   snprintf(ver, sizeof(ver), "%s(%d)", APP_VERSION, APP_BUILD);
   const int ver_w = (int)strlen(ver) * 6;

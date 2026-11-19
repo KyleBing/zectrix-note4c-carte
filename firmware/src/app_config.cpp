@@ -10,6 +10,7 @@ static Preferences g_prefs;
 static void clearConfig() {
   memset(&g_cfg, 0, sizeof(g_cfg));
   strncpy(g_cfg.portal_base_url, "https://kylebing.cn/portal", sizeof(g_cfg.portal_base_url) - 1);
+  g_cfg.album_show_header = true;
 }
 
 static void syncActiveWifiMirror() {
@@ -57,6 +58,20 @@ bool saveAppConfig() {
   const bool ok = g_prefs.putString("cfg", json) > 0;
   g_cfg.loaded = true;
   return ok;
+}
+
+void saveUiSession(uint8_t app_id, uint8_t weather_mode, int album_index) {
+  g_prefs.putUChar("ui_app", app_id);
+  g_prefs.putUChar("ui_wx", weather_mode);
+  g_prefs.putInt("ui_alb", album_index);
+}
+
+bool loadUiSession(uint8_t &app_id, uint8_t &weather_mode, int &album_index) {
+  if (!g_prefs.isKey("ui_app")) return false;
+  app_id = g_prefs.getUChar("ui_app", 0);
+  weather_mode = g_prefs.getUChar("ui_wx", 0);
+  album_index = g_prefs.getInt("ui_alb", 0);
+  return true;
 }
 
 bool upsertAppConfigWifi(const char *ssid, const char *password, bool set_active) {
@@ -151,6 +166,57 @@ bool saveDiaryId(const char *id) {
   return saveAppConfig();
 }
 
+static void sanitizeQWeatherHost(char *host, size_t cap) {
+  if (!host || cap == 0) return;
+  // strip scheme / path — store hostname only (RideTrack sanitizedHost)
+  String h = host;
+  h.trim();
+  if (h.startsWith("https://")) h.remove(0, 8);
+  else if (h.startsWith("http://")) h.remove(0, 7);
+  const int slash = h.indexOf('/');
+  if (slash >= 0) h.remove(slash);
+  memset(host, 0, cap);
+  strncpy(host, h.c_str(), cap - 1);
+}
+
+bool saveQWeatherConfig(bool enabled, const char *host, const char *key, const char *loc_id,
+                        const char *loc_name) {
+  g_cfg.qweather_enabled = enabled;
+  if (host) {
+    strncpy(g_cfg.qweather_host, host, sizeof(g_cfg.qweather_host) - 1);
+    sanitizeQWeatherHost(g_cfg.qweather_host, sizeof(g_cfg.qweather_host));
+  }
+  if (key) {
+    String k = key;
+    k.trim();
+    memset(g_cfg.qweather_key, 0, sizeof(g_cfg.qweather_key));
+    strncpy(g_cfg.qweather_key, k.c_str(), sizeof(g_cfg.qweather_key) - 1);
+  }
+  if (loc_id) {
+    strncpy(g_cfg.qweather_location_id, loc_id, sizeof(g_cfg.qweather_location_id) - 1);
+  }
+  if (loc_name) {
+    strncpy(g_cfg.qweather_location_name, loc_name, sizeof(g_cfg.qweather_location_name) - 1);
+  }
+  return saveAppConfig();
+}
+
+bool saveIdleOffSec(uint32_t sec) {
+  g_cfg.idle_off_sec = sec;
+  return saveAppConfig();
+}
+
+bool saveAlbumShowHeader(bool show) {
+  g_cfg.album_show_header = show;
+  return saveAppConfig();
+}
+
+bool qweatherConfigured() {
+  // 天气经 Portal 代理：需要登录 Token + 已选 LocationID（和风密钥在服务器）
+  return g_cfg.qweather_enabled && g_cfg.qweather_location_id[0] && g_cfg.portal_token[0] &&
+         g_cfg.portal_base_url[0];
+}
+
 String appConfigToJson(bool mask_secrets) {
   JsonDocument doc;
   JsonArray wifis = doc["wifis"].to<JsonArray>();
@@ -175,6 +241,22 @@ String appConfigToJson(bool mask_secrets) {
     portal["token_set"] = g_cfg.portal_token[0] != '\0';
   }
   portal["diary_id"] = g_cfg.diary_id;
+
+  JsonObject qw = doc["qweather"].to<JsonObject>();
+  qw["enabled"] = g_cfg.qweather_enabled;
+  qw["host"] = g_cfg.qweather_host;
+  if (mask_secrets && g_cfg.qweather_key[0]) {
+    qw["key"] = String(g_cfg.qweather_key).substring(0, 4) + "********";
+    qw["key_set"] = true;
+  } else {
+    qw["key"] = g_cfg.qweather_key;
+    qw["key_set"] = g_cfg.qweather_key[0] != '\0';
+  }
+  qw["location_id"] = g_cfg.qweather_location_id;
+  qw["location_name"] = g_cfg.qweather_location_name;
+  doc["idle_off_sec"] = g_cfg.idle_off_sec;
+  doc["album_show_header"] = g_cfg.album_show_header;
+
   String out;
   serializeJsonPretty(doc, out);
   return out;
@@ -222,6 +304,27 @@ bool appConfigFromJson(const char *json) {
       strncpy(g_cfg.portal_token, tok, sizeof(g_cfg.portal_token) - 1);
     }
     strncpy(g_cfg.diary_id, portal["diary_id"] | "", sizeof(g_cfg.diary_id) - 1);
+  }
+
+  JsonObject qw = doc["qweather"].as<JsonObject>();
+  if (!qw.isNull()) {
+    g_cfg.qweather_enabled = qw["enabled"] | false;
+    strncpy(g_cfg.qweather_host, qw["host"] | "", sizeof(g_cfg.qweather_host) - 1);
+    sanitizeQWeatherHost(g_cfg.qweather_host, sizeof(g_cfg.qweather_host));
+    const char *key = qw["key"] | "";
+    if (key[0] && !strstr(key, "********")) {
+      strncpy(g_cfg.qweather_key, key, sizeof(g_cfg.qweather_key) - 1);
+    }
+    strncpy(g_cfg.qweather_location_id, qw["location_id"] | "", sizeof(g_cfg.qweather_location_id) - 1);
+    strncpy(g_cfg.qweather_location_name, qw["location_name"] | "",
+            sizeof(g_cfg.qweather_location_name) - 1);
+  }
+
+  g_cfg.idle_off_sec = doc["idle_off_sec"] | 0;
+  if (doc["album_show_header"].is<bool>()) {
+    g_cfg.album_show_header = doc["album_show_header"].as<bool>();
+  } else {
+    g_cfg.album_show_header = true;
   }
 
   size_t n = strlen(g_cfg.portal_base_url);

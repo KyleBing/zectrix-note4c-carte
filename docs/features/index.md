@@ -1,21 +1,25 @@
 # 固件功能说明
 
-> 当前固件：**待办看板**（portal-go diary）+ **WiFi / Web 配网鉴权** + 四色墨水屏  
+> 当前固件：**多 App**（待办 / 日记 / 天气 / 相册占位）+ **WiFi / Web 配网鉴权** + 和风天气 + 四色墨水屏  
+> 主调：白底黑字，黄强调，红警示  
 > 版本：`{{DOC_VERSION}}` · 工程目录：`firmware/` · PlatformIO env：`note4c`
 
 ---
 
 ## 1. 定位
 
-到货验收之后的主功能：从 [portal-go](https://github.com/KyleBing/portal-go) 拉取**指定 id 的日记**，全刷到 NOTE4C 四色屏；WiFi 与登录鉴权通过设备上的 Web 配置页完成（交互参考 Cardputer Sparks）。
+到货验收之后的主功能：从 [portal-go](https://github.com/KyleBing/portal-go) 拉取**指定 id 的日记**（待办 / 日记 App）；和风天气按配置拉取实况与预报；WiFi 与鉴权通过设备 Web 配置页完成。
 
 | 能力 | 说明 |
 | --- | --- |
+| 多 App | 上下短按切换：TODO → WEATHER → ALBUM；顶栏显示槽位 `n/3` |
+| 相册 | Web `/album` 页内编辑（裁切/色阶/取色映射）后抖动上传 `.2bp`；BOOT 翻页；最多 30 张；可取消「展示」但仍保留文件 |
 | 多 WiFi | 最多 5 组 SSID；按 Active → 其余顺序自动连接 |
 | 配网 Web | STA 同网或 AP 热点 `note4c` / `note4c4c`（`http://192.168.4.1`；密码须 ≥8 位） |
 | Portal 登录 | `POST /portal/user/login`，JWT 落盘 |
 | Token 续签 | 响应头 `X-Access-Token`（剩余 &lt; 7 天）自动写回 |
-| 待办页 | `GET /portal/diary/detail?diaryId=`；按 diary 规则 `-` 未完成 / `=` 已完成（未完成在前，勾选框 + 删除线） |
+| 待办页 | `GET /portal/diary/detail?diaryId=`；`-` 未完成 / `=` 已完成（未完成在前） |
+| 天气 | 经 Portal `/weather/*` 代理和风；设备只配位置；BOOT 切换 NOW / 12H / 7D / 14D |
 | 中文显示 | LittleFS：`HZK16` + `ASC16` + `uni2gb.bin` |
 
 ---
@@ -24,19 +28,19 @@
 
 | 操作 | 行为 |
 | --- | --- |
-| 短按松开 **BOOT** | 连网拉取 diary 并全刷待办页（约 10s+） |
-| 短按松开 **UP** | 启动配置 Web（有 WiFi 则 STA，否则 AP） |
-| 长按 **UP ~1.5s** | 强制 AP 配网（`note4c` / `note4c4c`） |
-| 长按 **DOWN ~3s** | **关机**：释放 `PWR_HOLD`（刷屏 / 连网中也可；仅电池供电时真正断电，USB 供电可能仍亮） |
+| 短按松开 **DOWN** | **下一个 App**（1→2→3，往下翻） |
+| 短按松开 **UP** | **上一个 App**（3→2→1，往上翻） |
+| 长按 **UP ~1.5s** | 启动配置 Web（已在 Web 再长按 → 强制 AP） |
+| 长按 **DOWN ~3s** | **关机**：释放 `PWR_HOLD` |
+| 短按松开 **BOOT** | **仅 App 内功能键**：天气切 NOW→12H→7D→14D；待办刷新；相册下一张；Web 中退出回 App |
 
 ### LED（空闲关闭）
 
 | 图案 | 含义 |
 | --- | --- |
-| 灭 | 空闲 / 无事 |
+| 按下即亮 | 任意键按下灯亮，松开才灭（含长按） |
+| 呼吸 | 墨水屏刷新页面 |
 | 慢闪 | 正在连 WiFi / 启动 Web |
-| 快闪 | 拉取日记 / 刷屏 |
-| 双脉冲 | 配置 Web 已就绪（AP 或 STA） |
 | 三短闪 | 失败 |
 
 ---
@@ -47,14 +51,16 @@
 
 | 路径 | 用途 |
 | --- | --- |
-| `/` | 状态：模式、IP、Token、Diary ID |
+| `/` | 状态：模式、IP、Token、Diary、天气 |
 | `/wifi` | 编辑最多 5 条 WiFi，选 Active |
-| `/auth` | Portal Base URL、邮箱登录、Diary ID；密码仅本次提交不落盘 |
+| `/auth` | Portal Base URL、邮箱登录、Diary ID |
 | `/todo` | 在线预览拉取到的日记正文 |
+| `/weather` | 启用开关 + 城市搜索选 LocationID（经 Portal geo） |
+| `/album` | 选图 → 页内抖动成 `.2bp` → 上传 / 列表 / 删除 |
 
-默认 Base URL：`https://kylebing.cn/portal`（与 portal-go 文档一致）。
+默认 Portal Base URL：`https://kylebing.cn/portal`。
 
-鉴权约定见 portal-go `docs/api.md`：`Authorization: Bearer <jwt>`；快过期时服务端在 `X-Access-Token` 下发新 JWT。
+和风 JWT/Key 在 **portal-go** 服务端；设备用已登录 Token 调 `/portal/weather/now|hourly|daily|geo`。
 
 ---
 
@@ -82,10 +88,11 @@ pio device monitor              # 115200
 
 - 全刷约 **10s+**，属正常；勿高频刷新
 - 中文 16×16（GB2312/HZK16），ASCII 8×16；需先 `uploadfs`
+- 顶栏电池只画图标，不显示百分比（方便拍照）
 - 未刷字库时 CJK 会显示为方框，ASCII 仍可用 6×8 回退
 
 ---
 
 ## 6. 自检残留
 
-启动时仍会探测 I2C（RTC / NFC / ES8311）并打串口日志；主界面已改为待办页，不再默认刷硬件色条自检页。
+启动时仍会探测 I2C（RTC / NFC / ES8311）并打串口日志；主界面为多 App，默认进 TODO。
