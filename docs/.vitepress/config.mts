@@ -66,15 +66,18 @@ export default defineConfig({
     },
     nav: [
       { text: '首页', link: '/' },
-      { text: '固件功能', link: '/features/' },
-      { text: '从零开发', link: '/guide/getting-started' },
       {
-        text: '硬件',
+        text: '固件',
         items: [
-          { text: '硬件参数', link: '/hardware/note4c' },
-          { text: '硬件速览', link: '/hardware/overview' },
+          { text: '功能说明', link: '/features/' },
+          { text: '行为机制', link: '/features/behavior' },
+          {
+            text: '下载最新固件',
+            link: 'https://github.com/KyleBing/zectrix-note4c-display/releases',
+          },
         ],
       },
+      { text: '硬件参数', link: '/hardware/note4c' },
       {
         text: DOC_VERSION,
         items: [
@@ -91,14 +94,13 @@ export default defineConfig({
         items: [
           { text: '简介', link: '/' },
           { text: '固件功能', link: '/features/' },
-          { text: '从零开发', link: '/guide/getting-started' },
+          { text: '行为机制', link: '/features/behavior' },
         ],
       },
       {
         text: '硬件',
         items: [
-          { text: '硬件参数（完整）', link: '/hardware/note4c' },
-          { text: '硬件速览', link: '/hardware/overview' },
+          { text: '硬件参数', link: '/hardware/note4c' },
         ],
       },
     ],

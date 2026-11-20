@@ -33,6 +33,7 @@
 #include "app_battery.h"
 #include "app_rtc.h"
 #include "app_version.h"
+#include "app_errorlog.h"
 
 static EpdSsd2683 epd;
 static AppId g_app = AppId::Todo;
@@ -118,7 +119,7 @@ static void drawConfigWebPage(bool ok, bool forced_ap) {
   } else {
     y = fontDrawTextWrapped(epd, 8, y, 384, 260, "请与手机连同一 WiFi，浏览器打开上面的地址", Theme::Fg);
   }
-  y = fontDrawTextWrapped(epd, 8, y + 8, 384, 260, "页面：状态、设置、WiFi、鉴权、待办、天气、相册", Theme::Fg);
+  y = fontDrawTextWrapped(epd, 8, y + 8, 384, 260, "页面：状态、设置、LED、WiFi、鉴权、待办、天气、相册", Theme::Fg);
   y = fontDrawTextWrapped(epd, 8, y + 4, 384, 260, "长按上键：强制开热点", Theme::Fg);
   y = fontDrawTextWrapped(epd, 8, y, 384, 260, "BOOT 键：退出配置，返回应用", Theme::Fg);
   y = fontDrawTextWrapped(epd, 8, y, 384, 260, "长按下键约 3 秒：关机；再按下键开机", Theme::Fg);
@@ -166,8 +167,7 @@ void setup() {
 
   pinMode(PIN_BTN_BOOT, INPUT_PULLUP);
   pinMode(PIN_BTN_UP, INPUT_PULLUP);
-  pinMode(PIN_STDBY, INPUT);
-  pinMode(PIN_CHRG, INPUT);
+  // CHRG/STDBY configured in batteryBegin() (CHRG needs pull-up)
 
   pinMode(PIN_NFC_PWR, OUTPUT);
   pinMode(PIN_AUDIO_PWR, OUTPUT);
@@ -193,6 +193,7 @@ void setup() {
   }
 
   fontBegin();
+  errorLogBegin();
 
   i2cBusRecover();
   digitalWrite(PIN_AUDIO_PWR, HIGH);
@@ -277,13 +278,17 @@ void loop() {
 
   if (in_web) {
     if (powerTakeBootClicksNow()) {
-      const AppId stayed = g_app;
       busy = true;
       ledSet(LedPattern::Breathe);
       Serial.println("[UI] BOOT -> exit web");
       webStop();
+      // 配置里关掉了当前 App：跟 showCurrentApp 一样落到第一个可用的，不要再还原回去
+      if (!appIdEnabled(g_app)) {
+        const AppId was = g_app;
+        g_app = appIdFirstEnabled();
+        Serial.printf("[UI] web exit: %s disabled -> %s\n", appIdName(was), appIdName(g_app));
+      }
       const bool ok = showCurrentApp(false);
-      if (g_app != stayed) g_app = stayed;
       finishAction(ok);
       return;
     }
@@ -292,26 +297,29 @@ void loop() {
   } else if (!busy) {
     const uint8_t n = powerTakeBootBurst();
     if (n) {
-      const AppId stayed = g_app;
       busy = true;
       ledSet(LedPattern::Breathe);
+      // 会话若仍指着已禁用 App（旧 bug 残留），先对齐再处理 BOOT
+      if (!appIdEnabled(g_app)) {
+        const AppId was = g_app;
+        g_app = appIdFirstEnabled();
+        Serial.printf("[UI] BOOT: %s disabled -> %s\n", appIdName(was), appIdName(g_app));
+      }
       Serial.printf("[UI] BOOT x%u app=%s\n", (unsigned)n, appIdName(g_app));
       bool ok = false;
       if (g_app == AppId::Weather) {
         for (uint8_t i = 0; i < n; i++) g_weather_mode = weatherModeNext(g_weather_mode);
         Serial.printf("[UI] weather skip %u -> %s\n", (unsigned)n, weatherModeName(g_weather_mode));
+        persistUi();  // keep mode if fetch/WDT resets before finishAction
         ok = showCurrentApp(false);
       } else if (g_app == AppId::Album) {
         const int count = albumCountCached();
         if (count > 0) g_album_index = (g_album_index + (int)n) % count;
         Serial.printf("[UI] album skip %u -> %d/%d\n", (unsigned)n, g_album_index, count);
+        persistUi();
         ok = showCurrentApp(false);
       } else {
         ok = showCurrentApp(false);
-      }
-      if (g_app != stayed) {
-        Serial.printf("[UI] BUG app mutated %s -> %s, revert\n", appIdName(stayed), appIdName(g_app));
-        g_app = stayed;
       }
       finishAction(ok);
       return;

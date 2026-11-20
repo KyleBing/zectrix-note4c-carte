@@ -4,6 +4,8 @@
 > 主调：白底黑字，黄强调，红警示  
 > 固件名：**Carte** · 版本：`{{DOC_VERSION}}` · 工程目录：`firmware/` · PlatformIO env：`carte`
 
+运行时按键 / Web / 错误日志等「为什么会这样」见 **[固件行为机制](/features/behavior)**。
+
 ---
 
 ## 1. 定位
@@ -30,7 +32,7 @@
 
 | 操作 | 行为 |
 | --- | --- |
-| 短按松开 **DOWN** | **下一个 App**；连按后停约 180ms 再跳过 N 个（同相册 BOOT） |
+| 短按松开 **DOWN** | **下一个 App**；连按后停约 500ms 再跳过 N 个（同相册 BOOT） |
 | 短按松开 **UP** | **上一个 App**；连按同样超时合并 |
 | 长按 **UP ~1.5s** | 启动配置 Web（已在 Web 再长按 → 强制 AP） |
 | 长按 **DOWN ~3s** | **关机**：释放 `PWR_HOLD` 并深睡；再按下键唤醒开机 |
@@ -39,9 +41,13 @@
 
 ### LED（空闲关闭）
 
+设备 Web 导航 **LED**（`/led`）有完整示意动画说明。摘要：
+
 | 图案 | 含义 |
 | --- | --- |
 | 按下即亮 | 任意键按下灯亮，松开才灭（含长按） |
+| 上电三闪 | 已开机（不刷屏） |
+| 长按确认两闪 | UP 开 Web / DOWN 关机阈值到达 |
 | 呼吸 | 墨水屏刷新页面 |
 | 慢闪 | 正在连 WiFi / 启动 Web |
 | 三短闪 | 失败 |
@@ -54,12 +60,15 @@
 
 | 路径 | 用途 |
 | --- | --- |
-| `/` | 状态：模式、IP、Token、Diary、天气 |
+| `/` | 状态：模式、IP、Token、Diary、天气、错误条数 |
+| `/settings` | App 开关、电源 / 日历时间 |
+| `/led` | LED 图案说明 |
 | `/wifi` | 编辑最多 5 条 WiFi，选 Active |
 | `/auth` | Portal Base URL、邮箱登录、Diary ID |
 | `/todo` | 在线预览拉取到的日记正文 |
 | `/weather` | 启用开关 + 城市搜索选 LocationID（经 Portal geo） |
 | `/album` | 选图 → 页内抖动成 `.2bp` → 上传 / 列表 / 删除 |
+| `/errors` | 过往错误事件（最多 40 条，可清空） |
 
 默认 Portal Base URL：`https://kylebing.cn/portal`。
 

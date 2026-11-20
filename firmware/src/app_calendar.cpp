@@ -8,6 +8,7 @@
 #include "app_footer.h"
 #include "app_version.h"
 #include "app_wifi.h"
+#include "app_errorlog.h"
 
 #include <cstdio>
 #include <cstring>
@@ -55,7 +56,10 @@ static int textWidthSmall(const char *utf8) {
 }
 
 bool calendarShow(EpdSsd2683 &epd) {
-  if (!epd.ok()) return false;
+  if (!epd.ok()) {
+    errorLog("calendar", "EPD not ready");
+    return false;
+  }
 
   if (wifiIsStaConnected()) {
     rtcSyncIfDue(6000);
@@ -65,12 +69,16 @@ bool calendarShow(EpdSsd2683 &epd) {
 
   RtcDateTime now;
   if (!rtcRead(now)) {
+    const char *msg = "无法读取时间。\n请联网同步 NTP，或检查 RTC 芯片。";
+    errorLog("calendar", msg);
     epd.clear(Theme::Bg);
     headerDrawAppBar(epd, AppId::Calendar, "CALENDAR");
-    fontDrawTextWrapped(epd, Theme::MarginX, 40, 384, Theme::FooterY - 4,
-                        "无法读取时间。\n请联网同步 NTP，或检查 RTC。", Theme::Fg);
+    int y = fontDrawTextWrapped(epd, Theme::MarginX, 40, 384, Theme::FooterY - 4, "错误详情",
+                                Theme::Alert);
+    y += 4;
+    fontDrawTextWrapped(epd, Theme::MarginX, y, 384, Theme::FooterY - 4, msg, Theme::Fg);
     epd.display();
-    return false;
+    return true;
   }
 
   epd.clear(Theme::Bg);

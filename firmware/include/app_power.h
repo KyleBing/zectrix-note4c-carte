@@ -4,7 +4,7 @@
 
 // Quiet window after last short-release before a multi-click burst is taken
 // (BOOT album/weather skip, UP/DOWN app skip).
-static constexpr uint32_t POWER_KEY_COMBO_MS = 180;
+static constexpr uint32_t POWER_KEY_COMBO_MS = 500;
 
 void powerBegin();
 

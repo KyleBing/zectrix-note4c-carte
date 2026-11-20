@@ -2,9 +2,11 @@
 #include "board.h"
 
 // Matches LazyYoun zectrix-s3-epaper-4.2 ReadBatteryStatus curve + 1:1 divider (*2).
+// Header icon geometry mirrors Cardputer drawIconBattery / drawIconChargingBolt.
 
 void batteryBegin() {
-  pinMode(PIN_CHRG, INPUT);
+  // CHRG is open-drain active-LOW; need pull-up or it floats and always looks "charging".
+  pinMode(PIN_CHRG, INPUT_PULLUP);
   pinMode(PIN_STDBY, INPUT);
   analogReadResolution(12);
 #if defined(ADC_11db)
@@ -74,63 +76,76 @@ const char *batteryChargeLabel(BatteryCharge c) {
   }
 }
 
-static void drawBolt(EpdSsd2683 &epd, int x, int y, EpdColor fg) {
-  // Compact lightning bolt (~6x10) for charging
-  static const uint8_t bits[10] = {
-      0b00110000, 0b00110000, 0b01100000, 0b01100000, 0b11111100,
-      0b00110000, 0b00110000, 0b00011000, 0b00011000, 0b00001000,
-  };
-  for (int row = 0; row < 10; row++) {
-    for (int col = 0; col < 8; col++) {
-      if (bits[row] & (0x80 >> col)) epd.setPixel(x + col, y + row, fg);
-    }
-  }
+// Same constants / layout as Cardputer app_icons.cpp drawIconBattery.
+static constexpr int kSegs = 5;
+static constexpr int kSegW = 3;
+static constexpr int kSegH = 8;
+static constexpr int kSegGap = 1;
+static constexpr int kBorder = 1;
+static constexpr int kInnerGap = 1;
+static constexpr int kHeadW = 2;
+static constexpr int kHeadH = 4;
+static constexpr int kBoltZoneW = 6;
+static constexpr int kBoltGap = 1;
+
+static int batteryInset() { return kBorder + kInnerGap; }
+static int batteryInnerW() { return kSegs * kSegW + (kSegs - 1) * kSegGap; }
+static int batteryBodyW() { return batteryInnerW() + batteryInset() * 2; }
+static int batteryBodyH() { return kSegH + batteryInset() * 2; }
+static int batteryIndicatorW() { return kHeadW + batteryBodyW(); }
+
+// Cardputer drawIconChargingBolt — yellow zigzag from two triangles.
+static void drawChargingBolt(EpdSsd2683 &epd, int zone_x, int y, int body_h) {
+  const int cx = zone_x + kBoltZoneW / 2;
+  const int cy = y + body_h / 2;
+  const int s = body_h <= 12 ? 1 : 0;
+  epd.fillTriangle(cx + 1 - s, cy - 4 + s, cx - 2, cy + 1, cx, cy + 1, EPD_YELLOW);
+  epd.fillTriangle(cx - 1 + s, cy + 4 - s, cx + 2, cy - 1, cx, cy - 1, EPD_YELLOW);
 }
 
 int batteryDrawHeader(EpdSsd2683 &epd, int right_x, int y) {
-  // Icon only (no percent) — cleaner for device photos / screenshots.
   const BatteryStatus bat = batteryRead();
-  const EpdColor accent = EPD_WHITE;
-
-  // Battery body (cardputer-like: head on left, 5 segments)
-  // inner = 5*3 + 4*1 = 19 → body_w = 19 + 2*inset = 23
-  constexpr int body_w = 23;
-  constexpr int body_h = 12;
-  constexpr int head_w = 2;
-  constexpr int head_h = 6;
-  constexpr int segs = 5;
-  constexpr int seg_w = 3;
-  constexpr int seg_h = 8;
-  constexpr int seg_gap = 1;
-  constexpr int inset = 2;
-
-  int icon_right = right_x;
   const bool charging = bat.charge == BatteryCharge::Charging;
+  // Cardputer: charging → GREEN body + YELLOW bolt. EPD has no green → YELLOW body.
+  const EpdColor accent = charging ? EPD_YELLOW : EPD_WHITE;
+
+  const int body_w = batteryBodyW();
+  const int body_h = batteryBodyH();
+  const int bolt_offset = charging ? (kBoltZoneW + kBoltGap) : 0;
+  const int total_w = batteryIndicatorW() + bolt_offset;
+  const int x = right_x - total_w;  // left edge of [bolt?][head][body]
+
+  // Clear strip (header bg is already black; keep for parity with Cardputer)
+  epd.fillRect(x, y, total_w, body_h, EPD_BLACK);
+
   if (charging) {
-    drawBolt(epd, icon_right - 7, y + 1, accent);
-    icon_right -= 9;
+    drawChargingBolt(epd, x, y, body_h);
   }
 
-  const int body_x = icon_right - body_w;
-  const int head_x = body_x - head_w;
-  const int head_y = y + (body_h - head_h) / 2;
-  epd.fillRect(head_x, head_y, head_w, head_h, accent);
+  // 正极朝左：head | body
+  const int battery_x = x + bolt_offset;
+  const int head_x = battery_x;
+  const int body_x = battery_x + kHeadW;
+  const int head_y = y + (body_h - kHeadH) / 2;
+  epd.fillRect(head_x, head_y, kHeadW, kHeadH, accent);
   epd.drawRect(body_x, y, body_w, body_h, accent);
 
   int filled = 0;
   if (bat.ok) {
-    filled = (bat.percent + 19) / 20;  // 0..5
-    if (filled > segs) filled = segs;
+    filled = (bat.percent + 19) / 20;
+    if (filled > kSegs) filled = kSegs;
+    if (filled < 0) filled = 0;
   }
+  const int inset = batteryInset();
   const int seg_x0 = body_x + inset;
   const int seg_y = y + inset;
-  for (int i = 0; i < segs; i++) {
-    // fill from the end opposite the head (right → left)
-    if (i >= segs - filled) {
-      const int sx = seg_x0 + i * (seg_w + seg_gap);
-      epd.fillRect(sx, seg_y, seg_w, seg_h, accent);
+  for (int i = 0; i < kSegs; i++) {
+    // 从远离正极一侧开始亮（正极在左 → 从右往左填）
+    if (i >= kSegs - filled) {
+      const int sx = seg_x0 + i * (kSegW + kSegGap);
+      epd.fillRect(sx, seg_y, kSegW, kSegH, accent);
     }
   }
 
-  return head_x;
+  return x;
 }

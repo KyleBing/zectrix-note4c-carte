@@ -10,6 +10,7 @@
 #include "app_version.h"
 #include "app_power.h"
 #include "app_rtc.h"
+#include "app_errorlog.h"
 
 #include <WebServer.h>
 #include <WiFi.h>
@@ -23,7 +24,7 @@ static bool g_running = false;
 static bool g_ap = false;
 static char g_url[40] = "";
 
-enum class NavTab : uint8_t { Status, Settings, Wifi, Auth, Todo, Weather, Album };
+enum class NavTab : uint8_t { Status, Settings, Led, Wifi, Auth, Todo, Weather, Album, Errors };
 
 static const char *kCss = R"CSS(
 *{box-sizing:border-box}
@@ -187,6 +188,38 @@ body.page-album main{max-width:none;width:100%;margin:0;padding:0;display:block}
 .app-card .st{font-size:11px;font-weight:650;letter-spacing:.02em}
 .app-card.on .st{color:#0a7a4b}
 .app-card.off .st{color:#999}
+.led-list{list-style:none;padding:0;margin:0}
+.led-list li{display:grid;grid-template-columns:44px 1fr;gap:12px;align-items:center;padding:14px 0;border-bottom:1px solid #f0f0f0}
+.led-list li:last-child{border-bottom:0}
+.led-dot-wrap{width:44px;height:44px;border-radius:12px;background:#111;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.led-dot{width:14px;height:14px;border-radius:50%;background:#1a3d1a;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
+.led-dot.on{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55),0 0 2px #3dff7a}
+.led-dot.off{background:#1a3d1a;box-shadow:none}
+.led-meta .name{font-size:15px;font-weight:650;margin:0 0 4px}
+.led-meta .desc{font-size:13px;color:#555;margin:0;line-height:1.4}
+.led-meta .when{display:block;margin-top:4px;font-size:12px;color:#888}
+@keyframes led-slow{0%,49%{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}50%,100%{background:#1a3d1a;box-shadow:none}}
+@keyframes led-fast{0%,49%{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}50%,100%{background:#1a3d1a;box-shadow:none}}
+@keyframes led-breathe{0%,100%{background:#1a3d1a;box-shadow:none;opacity:1}50%{background:#3dff7a;box-shadow:0 0 12px rgba(61,255,122,.6);opacity:1}}
+@keyframes led-boot{0%,8%{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}9%,16%{background:#1a3d1a;box-shadow:none}17%,25%{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}26%,33%{background:#1a3d1a;box-shadow:none}34%,42%{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}43%,100%{background:#1a3d1a;box-shadow:none}}
+@keyframes led-ack{0%,8%{background:#1a3d1a;box-shadow:none}9%,16%{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}17%,25%{background:#1a3d1a;box-shadow:none}26%,33%{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}34%,100%{background:#1a3d1a;box-shadow:none}}
+@keyframes led-error{0%,6%{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}7%,13%{background:#1a3d1a;box-shadow:none}14%,20%{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}21%,27%{background:#1a3d1a;box-shadow:none}28%,34%{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}35%,100%{background:#1a3d1a;box-shadow:none}}
+@keyframes led-double{0%,8%{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}9%,16%{background:#1a3d1a;box-shadow:none}17%,25%{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}26%,100%{background:#1a3d1a;box-shadow:none}}
+.led-anim-solid{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}
+.led-anim-slow{animation:led-slow .8s steps(1,end) infinite}
+.led-anim-fast{animation:led-fast .24s steps(1,end) infinite}
+.led-anim-breathe{animation:led-breathe 1.6s ease-in-out infinite}
+.led-anim-boot{animation:led-boot 1.6s steps(1,end) infinite}
+.led-anim-ack{animation:led-ack 1.2s steps(1,end) infinite}
+.led-anim-error{animation:led-error 2s steps(1,end) infinite}
+.led-anim-double{animation:led-double .94s steps(1,end) infinite}
+.err-list{list-style:none;padding:0;margin:0}
+.err-list li{padding:12px 0;border-bottom:1px solid #f0f0f0}
+.err-list li:last-child{border-bottom:0}
+.err-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
+.err-src{display:inline-block;padding:2px 8px;border-radius:999px;background:#fdecec;color:#b42318;font-size:12px;font-weight:650}
+.err-when{font-size:12px;color:#888;font-variant-numeric:tabular-nums}
+.err-msg{margin:0;white-space:pre-wrap;background:#faf7f5;border:1px solid #f0e6e4;padding:10px 12px;border-radius:8px;font-size:13px;color:#1a1a1a;line-height:1.4}
 )CSS";
 
 static String htmlEscapeAttr(const char *s) {
@@ -240,20 +273,20 @@ static void appendFlashFromQuery(String &b) {
   else if (code == "weather") msg = "天气开关已保存";
   else if (code == "pick") msg = "已选用位置";
   else if (code == "saved") msg = "已保存";
+  else if (code == "err_cleared") msg = "错误记录已清空";
   if (!msg) return;
   b += err ? F("<div class='flash err'>") : F("<div class='flash ok'>");
   b += msg;
   b += F("</div>");
 }
 
-static void sendHtml(const String &title, NavTab active, const String &body) {
+static void sendHtml(NavTab active, const String &body) {
   String page;
   page.reserve(body.length() + 2000);
   page += F("<!DOCTYPE html><html><head><meta charset=utf-8>"
             "<meta name=viewport content='width=device-width,initial-scale=1'>"
-            "<link rel=icon href=/favicon.svg type=image/svg+xml><title>");
-  page += title;
-  page += F("</title><style>");
+            "<link rel=icon href=/favicon.svg type=image/svg+xml>"
+            "<title>Carte 配置</title><style>");
   page += kCss;
   page += F("</style></head><body");
   if (active == NavTab::Album) page += F(" class=page-album");
@@ -263,11 +296,13 @@ static void sendHtml(const String &title, NavTab active, const String &body) {
             "<h1>Carte</h1></div><nav>");
   appendNavLink(page, NavTab::Status, active, "/", "状态");
   appendNavLink(page, NavTab::Settings, active, "/settings", "设置");
+  appendNavLink(page, NavTab::Led, active, "/led", "LED");
   appendNavLink(page, NavTab::Wifi, active, "/wifi", "WiFi");
   appendNavLink(page, NavTab::Auth, active, "/auth", "鉴权");
   appendNavLink(page, NavTab::Todo, active, "/todo", "待办");
   appendNavLink(page, NavTab::Weather, active, "/weather", "天气");
   appendNavLink(page, NavTab::Album, active, "/album", "相册");
+  appendNavLink(page, NavTab::Errors, active, "/errors", "错误");
   page += F("</nav></header><main>");
   page += body;
   page += F("</main></body></html>");
@@ -344,6 +379,15 @@ static void handleRoot() {
   }
   kvRow(b, "一周起始", String(cfg.week_start_monday ? "周一" : "周日"));
   {
+    const int nerr = errorLogCount();
+    if (nerr > 0) {
+      kvRow(b, "错误", String("<a href=/errors><span class='pill warn'>") + String(nerr) +
+                            " 条 · 查看</span></a>");
+    } else {
+      kvRow(b, "错误", String("<a href=/errors><span class='pill off'>无</span></a>"));
+    }
+  }
+  {
     char tz[24];
     const int off = cfg.tz_offset_min;
     const int omin = (off < 0 ? -off : off) % 60;
@@ -380,7 +424,7 @@ static void handleRoot() {
     kvRow(b, "应用", apps);
   }
   b += F("</dl></section>");
-  sendHtml("状态", NavTab::Status, b);
+  sendHtml(NavTab::Status, b);
 }
 
 static const char *appCardSvg(AppId id) {
@@ -529,7 +573,7 @@ static void handleSettingsGet() {
   b += F(">");
   b += F("<div class=btn-row><button type=submit name=action value=set_manual>写入 RTC</button></div>");
   b += F("</form></section>");
-  sendHtml("设置", NavTab::Settings, b);
+  sendHtml(NavTab::Settings, b);
 }
 
 static void handleAppsPost() {
@@ -628,7 +672,7 @@ static void handleWifiGet() {
     b += F("</div>");
   }
   b += F("<div class=btn-row><button type=submit>保存 WiFi</button></div></form></section>");
-  sendHtml("WiFi", NavTab::Wifi, b);
+  sendHtml(NavTab::Wifi, b);
 }
 
 static void handleWifiPost() {
@@ -703,7 +747,7 @@ static void appendAuthForm(String &b, const AppConfig &cfg) {
 static void handleAuthGet() {
   String b;
   appendAuthForm(b, getAppConfig());
-  sendHtml("鉴权", NavTab::Auth, b);
+  sendHtml(NavTab::Auth, b);
 }
 
 static void handleAuthPost() {
@@ -734,7 +778,7 @@ static void handleAuthPost() {
     b += F("<div class='flash ok'>已保存</div>");
   }
   appendAuthForm(b, getAppConfig());
-  sendHtml("鉴权", NavTab::Auth, b);
+  sendHtml(NavTab::Auth, b);
 }
 
 static void handleTodoGet() {
@@ -743,7 +787,7 @@ static void handleTodoGet() {
   b += F("<p class=hint>从 portal <code>GET /diary/detail</code> 拉取，需 STA 已连外网并登录。</p>");
   b += F("<form method=POST action=/todo><div class=btn-row>"
          "<button type=submit>立即拉取</button></div></form></section>");
-  sendHtml("待办", NavTab::Todo, b);
+  sendHtml(NavTab::Todo, b);
 }
 
 static void handleTodoPost() {
@@ -752,7 +796,7 @@ static void handleTodoPost() {
     b += F("<section><div class='flash err'>需要 STA 已连接外网才能拉日记</div>");
     b += F("<form method=POST action=/todo><div class=btn-row>"
            "<button type=submit>重试</button></div></form></section>");
-    sendHtml("待办", NavTab::Todo, b);
+    sendHtml(NavTab::Todo, b);
     return;
   }
   DiaryDetail d;
@@ -814,7 +858,7 @@ static void handleTodoPost() {
     b += F("<form method=POST action=/todo><div class=btn-row style=margin-top:16px>"
            "<button type=submit>再拉一次</button></div></form></section>");
   }
-  sendHtml("待办", NavTab::Todo, b);
+  sendHtml(NavTab::Todo, b);
 }
 
 static void appendWeatherForm(String &b, const AppConfig &cfg, const WeatherGeoResult *geo,
@@ -895,7 +939,7 @@ static void appendWeatherForm(String &b, const AppConfig &cfg, const WeatherGeoR
 static void handleWeatherGet() {
   String b;
   appendWeatherForm(b, getAppConfig(), nullptr, nullptr);
-  sendHtml("天气", NavTab::Weather, b);
+  sendHtml(NavTab::Weather, b);
 }
 
 static void handleWeatherPost() {
@@ -938,14 +982,14 @@ static void handleWeatherPost() {
 
   String b;
   appendWeatherForm(b, getAppConfig(), (action == "search") ? &geo : nullptr, flash.c_str());
-  sendHtml("天气", NavTab::Weather, b);
+  sendHtml(NavTab::Weather, b);
 }
 
 static void handleAlbumGet() {
   albumEnsureDir();
   String b;
   webAlbumAppendPage(b);
-  sendHtml("相册", NavTab::Album, b);
+  sendHtml(NavTab::Album, b);
 }
 
 static void handleApiConfigGet() {
@@ -962,9 +1006,73 @@ static void handleFavicon() {
   f.close();
 }
 
+static void handleLedGet() {
+  String b;
+  b += F("<section><h2>LED 含义</h2>"
+         "<p class=hint>板载状态灯（GPIO3，低电平点亮）。空闲默认熄灭；"
+         "任意按键按下会强制常亮，松开后恢复下方图案。左侧圆点为示意动画。</p>"
+         "<ul class=led-list>");
+
+  auto row = [&](const char *anim, const char *name, const char *desc, const char *when) {
+    b += F("<li><div class=led-dot-wrap><span class='led-dot ");
+    b += anim;
+    b += F("'></span></div><div class=led-meta><p class=name>");
+    b += name;
+    b += F("</p><p class=desc>");
+    b += desc;
+    b += F("</p><span class=when>");
+    b += when;
+    b += F("</span></div></li>");
+  };
+
+  row("led-anim-solid", "常亮", "按键按下期间灯一直亮着，松开才灭。", "BOOT / UP / DOWN 任一按下");
+  row("led-anim-boot", "上电三闪", "快闪 3 下后熄灭，表示固件已启动（上电不刷墨水屏）。", "开机 / 深睡唤醒");
+  row("led-anim-ack", "长按确认两闪", "长按阈值到达时闪两下，可松手；随后执行对应动作。", "UP≈1.5s 开 Web · DOWN≈3s 关机");
+  row("led-anim-slow", "慢闪", "约 400ms 亮灭交替。", "正在连 WiFi / 启动配置网页");
+  row("led-anim-fast", "快闪", "约 120ms 亮灭交替。", "网络拉取等短时忙碌（如有）");
+  row("led-anim-breathe", "呼吸", "约 1.6s 周期由暗到亮再暗。", "墨水屏全刷页面期间");
+  row("led-anim-double", "双脉冲", "两短亮一停，重复约 3 次后自动灭。", "配置 Web / 热点就绪提示");
+  row("led-anim-error", "三短闪（失败）", "连续三下短亮，约 2s 内结束并熄灭。", "刷屏失败、开网页失败等");
+  row("off", "熄灭", "无图案时灯关闭。", "空闲待机");
+
+  b += F("</ul></section>");
+  b += F("<section><h2>怎么记</h2>"
+         "<p class=hint style=margin:0>按下有灯 → 松开看图案。"
+         "慢闪在联网，呼吸在刷屏，三短闪是出错，上电三闪表示已开机。</p></section>");
+  sendHtml(NavTab::Led, b);
+}
+
+static void handleErrorsGet() {
+  String b;
+  appendFlashFromQuery(b);
+  b += F("<section><div class=status-hero><div><h2 style=margin:0>错误记录</h2>"
+         "<p class=hint style=margin:6px 0 0>设备端最近事件（最多 ");
+  b += String(ERROR_LOG_MAX);
+  b += F(" 条），存于 LittleFS。墨水屏出错时也会写一条。</p></div>");
+  const int n = errorLogCount();
+  if (n > 0) {
+    b += F("<span class='pill warn'>");
+    b += String(n);
+    b += F(" 条</span>");
+  } else {
+    b += F("<span class='pill off'>空</span>");
+  }
+  b += F("</div>");
+  errorLogAppendHtml(b);
+  b += F("<form method=POST action=/errors/clear class=btn-row style=margin-top:16px>"
+         "<button type=submit class=danger>清空记录</button></form></section>");
+  sendHtml(NavTab::Errors, b);
+}
+
+static void handleErrorsClear() {
+  errorLogClear();
+  redirectOk("/errors", "err_cleared");
+}
+
 static void registerRoutes() {
   g_server.on("/", HTTP_GET, handleRoot);
   g_server.on("/settings", HTTP_GET, handleSettingsGet);
+  g_server.on("/led", HTTP_GET, handleLedGet);
   g_server.on("/apps", HTTP_POST, handleAppsPost);
   g_server.on("/power", HTTP_POST, handlePowerPost);
   g_server.on("/time", HTTP_POST, handleTimePost);
@@ -978,6 +1086,8 @@ static void registerRoutes() {
   g_server.on("/weather", HTTP_GET, handleWeatherGet);
   g_server.on("/weather", HTTP_POST, handleWeatherPost);
   g_server.on("/album", HTTP_GET, handleAlbumGet);
+  g_server.on("/errors", HTTP_GET, handleErrorsGet);
+  g_server.on("/errors/clear", HTTP_POST, handleErrorsClear);
   webAlbumRegisterRoutes(g_server);
   g_server.on("/api/config", HTTP_GET, handleApiConfigGet);
 }
@@ -1000,6 +1110,7 @@ bool webStart(bool force_ap) {
 
   if (!ok) {
     Serial.println("[Web] STA and AP both failed");
+    errorLog("web", "配置网页启动失败：STA 与热点均不可用（检查热点密码≥8位）");
     return false;
   }
 

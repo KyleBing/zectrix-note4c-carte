@@ -25,10 +25,9 @@ npm run build
 
 | 页面 | 说明 |
 | --- | --- |
-| [固件功能](docs/features/index.md) | 当前自检能力、屏幕行为、刷写 |
-| [从零开发](docs/guide/getting-started.md) | 工具链、验收顺序、复用策略 |
+| [固件功能](docs/features/index.md) | 能力表、Web 路径、刷写与字库 |
+| [行为机制](docs/features/behavior.md) | 上电/按键/App/Web/错误日志等运行时行为 |
 | [硬件参数](docs/hardware/note4c.md) | 完整规格 / 引脚 / bpp / BWRY |
-| [硬件速览](docs/hardware/overview.md) | 预研速查与 Demo 约定 |
 
 ## 固件
 

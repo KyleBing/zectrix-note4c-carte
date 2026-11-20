@@ -6,6 +6,7 @@
 #include "app_header.h"
 #include "app_footer.h"
 #include "app_version.h"
+#include "app_errorlog.h"
 
 #include <cstdio>
 #include <cstring>
@@ -90,16 +91,17 @@ void todoDrawPage(EpdSsd2683 &epd, const DiaryDetail &diary, const char *status_
     if (!items[i].done) undone++;
   }
 
-  // Header + app slot n/N (near battery)
-  const int bat_left = headerDrawAppBar(epd, AppId::Todo, "TODO");
+  // Header + app slot n/N (near battery). chrome_left = indicator, keep status left of it.
+  const int chrome_left = headerDrawAppBar(epd, AppId::Todo, "TODO");
   char line[48];
   if (n > 0) {
     snprintf(line, sizeof(line), "%d/%d open", undone, n);
     epd.drawText(56, 7, line, EPD_YELLOW, EPD_BLACK);
   }
   if (status_line && status_line[0]) {
-    const int max_status_x = bat_left - 40;
-    if (max_status_x > 160) epd.drawText(160, 7, status_line, EPD_YELLOW, EPD_BLACK);
+    const int sw = (int)strlen(status_line) * 6;
+    const int sx = chrome_left - 6 - sw;
+    if (sx >= 100) epd.drawText(sx, 7, status_line, EPD_YELLOW, EPD_BLACK);
   }
 
   // Meta
@@ -121,6 +123,8 @@ void todoDrawPage(EpdSsd2683 &epd, const DiaryDetail &diary, const char *status_
   constexpr int text_w = 400 - text_x - 8;
 
   if (!diary.ok) {
+    y = fontDrawTextWrapped(epd, 8, y, 384, footer_y - 4, "错误详情", EPD_RED);
+    y += 4;
     fontDrawTextWrapped(epd, 8, y, 384, footer_y - 4,
                         diary.message.length() ? diary.message.c_str() : "(error)", EPD_BLACK);
   } else if (n == 0) {
@@ -158,42 +162,48 @@ void todoDrawPage(EpdSsd2683 &epd, const DiaryDetail &diary, const char *status_
 }
 
 bool todoRefreshAndDraw(EpdSsd2683 &epd) {
-  if (!epd.ok()) return false;
+  if (!epd.ok()) {
+    errorLog("todo", "EPD not ready");
+    return false;
+  }
 
   DiaryDetail d;
   char status[24] = "fetch...";
 
+  auto failDraw = [&](const char *st) {
+    if (d.message.length()) errorLog("todo", d.message);
+    todoDrawPage(epd, d, st);
+    return true;  // 已刷错误页；勿 ErrorBurst
+  };
+
   if (!wifiIsStaConnected()) {
     if (!hasSavedWifiConfig()) {
-      d.message = "No WiFi. UP=config web / AP Note4C-Carte";
-      todoDrawPage(epd, d, "no-wifi");
-      return false;
+      d.message = "无 WiFi 配置。长按上键打开配置网页（热点 Note4C-Carte）。";
+      return failDraw("no-wifi");
     }
     strncpy(status, "wifi...", sizeof(status) - 1);
     if (!wifiConnectSaved(18000)) {
-      d.message = "WiFi connect failed. UP opens AP config.";
-      todoDrawPage(epd, d, "wifi-fail");
-      return false;
+      d.message = "WiFi 连接失败。长按上键打开热点配网，检查 SSID/密码。";
+      return failDraw("wifi-fail");
     }
   }
 
   if (!diaryHasToken()) {
-    d.message = "Not logged in. Open web /auth";
-    todoDrawPage(epd, d, "no-auth");
-    return false;
+    d.message = "未登录 Portal。请在配置网页打开 /auth 登录。";
+    return failDraw("no-auth");
   }
 
   const AppConfig &cfg = getAppConfig();
   if (!cfg.diary_id[0]) {
-    d.message = "diary_id empty. Set in web /auth";
-    todoDrawPage(epd, d, "no-id");
-    return false;
+    d.message = "diary_id 为空。请在 /auth 登录后选择待办日记。";
+    return failDraw("no-id");
   }
 
   Serial.printf("[Todo] fetch diary %s\n", cfg.diary_id);
   if (!diaryFetchById(cfg.diary_id, d)) {
-    todoDrawPage(epd, d, "err");
-    return false;
+    if (!d.message.length()) d.message = "拉取待办失败";
+    else d.message = String("拉取待办失败：") + d.message;
+    return failDraw("err");
   }
 
   snprintf(status, sizeof(status), "OK");
