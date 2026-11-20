@@ -82,3 +82,9 @@ esptool.py --chip esp32s3 write_flash \
 `/` 状态 · `/settings` 设置（应用开关 / 电源 / 时间）· `/help` 帮助（含 LED）· `/wifi` · `/auth` · `/todo` · `/weather` · `/album`
 
 JWT：登录保存；业务响应若带 `X-Access-Token` 则自动更新（portal-go 剩余 &lt; 7 天续签）。
+
+相册编辑页可在电脑浏览器里直接测（不必刷机 / 开 WiFi）：
+
+```bash
+python3 tools/album_preview.py    # http://127.0.0.1:8765
+```

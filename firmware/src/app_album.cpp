@@ -89,6 +89,22 @@ bool albumSetShown(const char *name, bool show) {
   return ok;
 }
 
+bool albumSetShownAll(bool show) {
+  AlbumList list;
+  if (!albumList(list)) return false;
+  if (!albumEnsureDir()) return false;
+  File f = LittleFS.open(ALBUM_VIS_PATH, "w");
+  if (!f) return false;
+  JsonDocument doc;
+  JsonArray arr = doc["hidden"].to<JsonArray>();
+  if (!show) {
+    for (int i = 0; i < list.count; i++) arr.add(list.names[i]);
+  }
+  const bool ok = serializeJson(doc, f) > 0;
+  f.close();
+  return ok;
+}
+
 bool albumList(AlbumList &out) {
   out = AlbumList{};
   if (!albumEnsureDir()) return false;

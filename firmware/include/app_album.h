@@ -22,6 +22,7 @@ bool albumDelete(const char *name);
 bool albumNameOk(const char *name);
 bool albumIsShown(const char *name);      // 缺省 true
 bool albumSetShown(const char *name, bool show);
+bool albumSetShownAll(bool show);
 // Allocate next free name like 001.2bp into out_name.
 bool albumNextFileName(char *out_name, size_t out_len);
 // Load .2bp into framebuffer; overlay header if configured, then full refresh.

@@ -50,6 +50,9 @@ pio run                   # 编译
 pio run -t upload         # 刷写（env: carte）→ app @ 0x10000
 pio run -t uploadfs       # 字库 LittleFS @ 0xC90000（首次必做）
 pio device monitor        # 115200
+
+# 本机预览相册编辑页（测抖动/出图，不连设备）
+python3 tools/album_preview.py
 ```
 
 | 区 | 地址 | 大小 |
