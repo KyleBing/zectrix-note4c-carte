@@ -157,26 +157,55 @@ static void drawConfigWebPage(bool ok) {
   constexpr int kGap = 3;
   constexpr int kMaxY = Theme::FooterY - 4;
   constexpr int kPad = 8;
+  constexpr int kBannerShiftX = 30;  // 图标+文案整体右移
+  constexpr int kIconTextGap = 20;   // 图标与右侧文字
   char line[64];
   const bool ap = webIsAp();
   const int icon_sz = 50;
   const int banner_y = Theme::HeaderH;
   const int banner_h = kPad + icon_sz + kPad;
   epd.fillRect(0, banner_y, 400, banner_h, Theme::HeaderBg);
-  webModeIconDraw(epd, kPad, banner_y + kPad, ap, icon_sz, false);
-  const int tx = kPad + icon_sz + kPad;
+  const int icon_x = kPad + kBannerShiftX;
+  const int icon_y = banner_y + kPad;
+  webModeIconDraw(epd, icon_x, icon_y, ap, icon_sz, false);
+  const int tx = icon_x + icon_sz + kIconTextGap;
   const int tw = 400 - tx - kPad;
-  int ty = banner_y + kPad;
+  // 模式名 + 地址两行，相对图标纵向居中
+  const int text_h = fontLineHeight() * 2;
+  int ty = icon_y + (icon_sz - text_h) / 2;
+  if (ty < icon_y) ty = icon_y;
   ty = fontDrawTextWrapped(epd, tx, ty, tw, banner_y + banner_h, webModeName(), Theme::HeaderAccent,
                            Theme::HeaderBg);
   snprintf(line, sizeof(line), "地址：%s", webUrl());
   fontDrawTextWrapped(epd, tx, ty, tw, banner_y + banner_h, line, Theme::HeaderFg, Theme::HeaderBg);
   int y = banner_y + banner_h + kGap;
   if (ap) {
-    snprintf(line, sizeof(line), "热点名 %s", WIFI_AP_SSID);
-    y = fontDrawTextWrapped(epd, 8, y, 384, kMaxY, line, Theme::Fg) + kGap;
-    snprintf(line, sizeof(line), "密码 %s", WIFI_AP_PASS);
-    y = fontDrawTextWrapped(epd, 8, y, 384, kMaxY, line, Theme::Fg) + kGap;
+    // 热点 / 密码：黄底黑框居中，标签等宽对齐
+    const int lh = fontLineHeight();
+    constexpr int kBoxPadX = 14;
+    constexpr int kBoxPadY = 8;
+    constexpr int kRowGap = 4;
+    constexpr int kLabelGap = 12;
+    const int label_w = utf8TextWidth("热点");  // 与「密码」同宽
+    const int val_w = (utf8TextWidth(WIFI_AP_SSID) > utf8TextWidth(WIFI_AP_PASS))
+                          ? utf8TextWidth(WIFI_AP_SSID)
+                          : utf8TextWidth(WIFI_AP_PASS);
+    const int box_w = kBoxPadX * 2 + label_w + kLabelGap + val_w;
+    const int box_h = kBoxPadY * 2 + lh * 2 + kRowGap;
+    int box_x = (EpdSsd2683::kWidth - box_w) / 2;
+    if (box_x < 8) box_x = 8;
+    epd.fillRect(box_x, y, box_w, box_h, Theme::Accent);
+    epd.drawRect(box_x, y, box_w, box_h, Theme::Fg);
+    const int text_x = box_x + kBoxPadX;
+    int row_y = y + kBoxPadY;
+    fontDrawTextWrapped(epd, text_x, row_y, label_w, row_y + lh, "热点", Theme::Fg, Theme::Accent);
+    fontDrawTextWrapped(epd, text_x + label_w + kLabelGap, row_y, val_w + 4, row_y + lh, WIFI_AP_SSID,
+                        Theme::Fg, Theme::Accent);
+    row_y += lh + kRowGap;
+    fontDrawTextWrapped(epd, text_x, row_y, label_w, row_y + lh, "密码", Theme::Fg, Theme::Accent);
+    fontDrawTextWrapped(epd, text_x + label_w + kLabelGap, row_y, val_w + 4, row_y + lh, WIFI_AP_PASS,
+                        Theme::Fg, Theme::Accent);
+    y = y + box_h + kGap + 2;
     y = fontDrawTextWrapped(epd, 8, y, 384, kMaxY, "手机连此热点后，用浏览器打开上面的地址", Theme::Fg) +
         kGap;
   } else {

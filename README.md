@@ -1,5 +1,11 @@
 <img width="120" src="design/favicon.svg" alt="LOGO" />
 
+<img width="6000" height="4000" alt="2026-11-20 zectrix note4c-天气预报-06" src="https://github.com/user-attachments/assets/5aa36b6a-1ee2-4a6b-ae88-1ceaf5656505" />
+
+<img width="6000" height="4000" alt="2026-11-19 zectrix note4c-06" src="https://github.com/user-attachments/assets/4e880ca3-fbe2-4deb-9fbc-f8948c13cea9" />
+
+
+
 # Carte
 
 面向 **ZECTRIX NOTE4C** 四色墨水屏的开放固件（多 App + Web 配网）。

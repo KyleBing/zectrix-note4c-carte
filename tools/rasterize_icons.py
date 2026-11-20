@@ -28,14 +28,16 @@ def nearest(r: int, g: int, b: int, a: int) -> int | None:
     return 0 if luma < 140 else 1
 
 
-def chrome_png(svg: Path, size: int, png: Path, work: Path) -> None:
+def chrome_png(svg: Path, size: int, png: Path, work: Path, *, black_bg: bool = False) -> None:
     if not CHROME.exists():
         raise FileNotFoundError(f"need Chrome to rasterize SVG: {CHROME}")
+    bg = "#000000" if black_bg else "#ffffff"
+    bg_arg = "000000ff" if black_bg else "ffffffff"
     html = work / "icon.html"
     html.write_text(
         "<!doctype html><html><head><meta charset=utf-8>"
         f"<style>*{{margin:0;padding:0}}html,body{{width:{size}px;height:{size}px;"
-        "background:#fff;overflow:hidden}}"
+        f"background:{bg};overflow:hidden}}"
         f"img{{width:{size}px;height:{size}px;display:block;object-fit:contain}}"
         f"</style></head><body><img src=\"{svg.resolve().as_uri()}\"></body></html>",
         encoding="utf-8",
@@ -46,7 +48,7 @@ def chrome_png(svg: Path, size: int, png: Path, work: Path) -> None:
             "--headless=new",
             "--disable-gpu",
             "--hide-scrollbars",
-            "--default-background-color=ffffffff",
+            f"--default-background-color={bg_arg}",
             f"--window-size={size},{size}",
             f"--screenshot={png}",
             html.resolve().as_uri(),
@@ -56,19 +58,26 @@ def chrome_png(svg: Path, size: int, png: Path, work: Path) -> None:
     )
 
 
-def crop_to_content(im: Image.Image, size: int) -> Image.Image:
+def _is_empty_pixel(r: int, g: int, b: int, a: int, *, black_bg: bool) -> bool:
+    if a < 40:
+        return True
+    if black_bg:
+        return r < 28 and g < 28 and b < 28
+    return r > 248 and g > 248 and b > 248
+
+
+def crop_to_content(im: Image.Image, size: int, *, black_bg: bool = False) -> Image.Image:
     pix = im.load()
     w, h = im.size
     xs, ys = [], []
     for y in range(h):
         for x in range(w):
             r, g, b, a = pix[x, y]
-            if a < 40:
-                continue
-            if r > 248 and g > 248 and b > 248:
+            if _is_empty_pixel(r, g, b, a, black_bg=black_bg):
                 continue
             xs.append(x)
             ys.append(y)
+    fill = (0, 0, 0, 255) if black_bg else (255, 255, 255, 255)
     if not xs:
         return im.resize((size, size), Image.Resampling.NEAREST)
     pad = 2
@@ -81,35 +90,38 @@ def crop_to_content(im: Image.Image, size: int) -> Image.Image:
     scale = min(size / cw, size / ch)
     nw, nh = max(1, int(cw * scale)), max(1, int(ch * scale))
     crop = crop.resize((nw, nh), Image.Resampling.LANCZOS)
-    canvas = Image.new("RGBA", (size, size), (255, 255, 255, 255))
+    canvas = Image.new("RGBA", (size, size), fill)
     canvas.paste(crop, ((size - nw) // 2, (size - nh) // 2), crop)
     return canvas
 
 
-def pack_row(pixels: list[int]) -> list[int]:
+def pack_row(pixels: list[int], *, pad_color: int = 1) -> list[int]:
     w = len(pixels)
     bpr = (w + 3) // 4
-    out = [0x55] * bpr  # pad white
+    # 2bpp pad: 0x00=black…, 0x55=white…
+    pad_byte = 0x00 if pad_color == 0 else 0x55
+    out = [pad_byte] * bpr
     for x, v in enumerate(pixels):
         if v is None:
-            v = 1
+            v = pad_color
         byte_i = x >> 2
         shift = 6 - 2 * (x & 3)
         out[byte_i] = (out[byte_i] & ~(0x03 << shift)) | ((v & 3) << shift)
     return out
 
 
-def bitmap_from_png(png: Path, size: int) -> list[int]:
+def bitmap_from_png(png: Path, size: int, *, black_bg: bool = False) -> list[int]:
     im = Image.open(png).convert("RGBA")
-    im = crop_to_content(im, size)
+    im = crop_to_content(im, size, black_bg=black_bg)
+    pad = 0 if black_bg else 1
     rows: list[int] = []
     for y in range(size):
         pix = []
         for x in range(size):
             r, g, b, a = im.getpixel((x, y))
             q = nearest(r, g, b, a)
-            pix.append(1 if q is None else q)
-        rows.extend(pack_row(pix))
+            pix.append(pad if q is None else q)
+        rows.extend(pack_row(pix, pad_color=pad))
     return rows
 
 
@@ -171,11 +183,12 @@ def main() -> None:
         parts.append("};")
         parts.append("")
 
+        # AP / LAN：透明底改为黑（配置页黑底 banner）
         for slug, ident in WEB:
             svg = ROOT / "design" / "icon" / f"{slug}_active.svg"
             png = tdir / f"{slug}.png"
-            chrome_png(svg, WEB_SRC, png, tdir)
-            data = bitmap_from_png(png, WEB_SRC)
+            chrome_png(svg, WEB_SRC, png, tdir, black_bg=True)
+            data = bitmap_from_png(png, WEB_SRC, black_bg=True)
             parts.append(c_array(f"kWeb{ident}", data))
             parts.append("")
 
