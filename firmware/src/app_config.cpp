@@ -1,4 +1,5 @@
 #include "app_config.h"
+#include "app_apps.h"
 
 #include <Preferences.h>
 #include <ArduinoJson.h>
@@ -11,6 +12,10 @@ static void clearConfig() {
   memset(&g_cfg, 0, sizeof(g_cfg));
   strncpy(g_cfg.portal_base_url, "https://kylebing.cn/portal", sizeof(g_cfg.portal_base_url) - 1);
   g_cfg.album_show_header = true;
+  g_cfg.week_start_monday = true;
+  g_cfg.tz_offset_min = 480;  // UTC+8
+  g_cfg.ntp_interval_days = 30;
+  g_cfg.apps_enabled = appsEnabledDefaultMask();
 }
 
 static void syncActiveWifiMirror() {
@@ -37,7 +42,23 @@ static void syncActiveWifiMirror() {
 
 bool initAppStorage() {
   clearConfig();
-  return g_prefs.begin("note4c", false);
+  if (!g_prefs.begin("carte", false)) return false;
+  // 从旧命名空间 note4c 迁移配置（固件更名 Carte）
+  if (!g_prefs.isKey("cfg")) {
+    Preferences legacy;
+    if (legacy.begin("note4c", true)) {
+      const String raw = legacy.getString("cfg", "");
+      if (raw.length()) g_prefs.putString("cfg", raw);
+      if (legacy.isKey("ui_app")) {
+        g_prefs.putUChar("ui_app", legacy.getUChar("ui_app", 0));
+        g_prefs.putUChar("ui_wx", legacy.getUChar("ui_wx", 0));
+        g_prefs.putInt("ui_alb", legacy.getInt("ui_alb", 0));
+      }
+      legacy.end();
+      Serial.println("[CFG] migrated prefs note4c -> carte");
+    }
+  }
+  return true;
 }
 
 bool loadAppConfig() {
@@ -211,6 +232,47 @@ bool saveAlbumShowHeader(bool show) {
   return saveAppConfig();
 }
 
+bool saveWeekStartMonday(bool monday) {
+  g_cfg.week_start_monday = monday;
+  return saveAppConfig();
+}
+
+bool saveTimezoneOffsetMin(int16_t minutes) {
+  if (minutes < -12 * 60) minutes = -12 * 60;
+  if (minutes > 14 * 60) minutes = 14 * 60;
+  g_cfg.tz_offset_min = minutes;
+  return saveAppConfig();
+}
+
+bool saveNtpIntervalDays(uint16_t days) {
+  if (days == 0) days = 30;
+  if (days > 365) days = 365;
+  g_cfg.ntp_interval_days = days;
+  return saveAppConfig();
+}
+
+bool saveAppsEnabled(uint8_t mask) {
+  const uint8_t all = appsEnabledDefaultMask();
+  mask &= all;
+  if (mask == 0) mask = all;  // 至少保留全部（防空）
+  g_cfg.apps_enabled = mask;
+  return saveAppConfig();
+}
+
+bool setAppEnabled(uint8_t app_id, bool enabled) {
+  if (app_id >= static_cast<uint8_t>(AppId::Count)) return false;
+  uint8_t mask = g_cfg.apps_enabled;
+  if (enabled) {
+    mask |= static_cast<uint8_t>(1u << app_id);
+  } else {
+    const uint8_t next = static_cast<uint8_t>(mask & ~(1u << app_id));
+    if (next == 0) return false;  // 至少保留一个
+    mask = next;
+  }
+  g_cfg.apps_enabled = mask;
+  return saveAppConfig();
+}
+
 bool qweatherConfigured() {
   // 天气经 Portal 代理：需要登录 Token + 已选 LocationID（和风密钥在服务器）
   return g_cfg.qweather_enabled && g_cfg.qweather_location_id[0] && g_cfg.portal_token[0] &&
@@ -256,6 +318,10 @@ String appConfigToJson(bool mask_secrets) {
   qw["location_name"] = g_cfg.qweather_location_name;
   doc["idle_off_sec"] = g_cfg.idle_off_sec;
   doc["album_show_header"] = g_cfg.album_show_header;
+  doc["week_start_monday"] = g_cfg.week_start_monday;
+  doc["tz_offset_min"] = g_cfg.tz_offset_min;
+  doc["ntp_interval_days"] = g_cfg.ntp_interval_days;
+  doc["apps_enabled"] = g_cfg.apps_enabled;
 
   String out;
   serializeJsonPretty(doc, out);
@@ -325,6 +391,28 @@ bool appConfigFromJson(const char *json) {
     g_cfg.album_show_header = doc["album_show_header"].as<bool>();
   } else {
     g_cfg.album_show_header = true;
+  }
+  if (doc["week_start_monday"].is<bool>()) {
+    g_cfg.week_start_monday = doc["week_start_monday"].as<bool>();
+  } else {
+    g_cfg.week_start_monday = true;
+  }
+  if (doc["tz_offset_min"].is<int>()) {
+    g_cfg.tz_offset_min = (int16_t)doc["tz_offset_min"].as<int>();
+  } else {
+    g_cfg.tz_offset_min = 480;
+  }
+  if (doc["ntp_interval_days"].is<int>()) {
+    g_cfg.ntp_interval_days = (uint16_t)doc["ntp_interval_days"].as<int>();
+    if (g_cfg.ntp_interval_days == 0) g_cfg.ntp_interval_days = 30;
+  } else {
+    g_cfg.ntp_interval_days = 30;
+  }
+  if (doc["apps_enabled"].is<int>()) {
+    g_cfg.apps_enabled = (uint8_t)doc["apps_enabled"].as<int>() & appsEnabledDefaultMask();
+    if (g_cfg.apps_enabled == 0) g_cfg.apps_enabled = appsEnabledDefaultMask();
+  } else {
+    g_cfg.apps_enabled = appsEnabledDefaultMask();
   }
 
   size_t n = strlen(g_cfg.portal_base_url);

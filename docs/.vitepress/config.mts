@@ -19,8 +19,8 @@ const SITE_ROOT = process.env.GITHUB_ACTIONS ? '/zectrix-note4c-display' : ''
 const base = SITE_ROOT ? `${SITE_ROOT}/` : '/'
 
 export default defineConfig({
-  title: 'NOTE4C Display',
-  description: 'ZECTRIX NOTE4C 四色墨水屏固件与硬件文档',
+  title: 'Carte',
+  description: 'Carte · ZECTRIX NOTE4C 四色墨水屏开放固件与硬件文档',
   base,
   outDir: '.vitepress/dist',
   lastUpdated: true,
@@ -55,13 +55,13 @@ export default defineConfig({
 
   themeConfig: {
     logo: '/assets/favicon.svg',
-    siteTitle: 'NOTE4C',
+    siteTitle: 'Carte',
     socialLinks: [
       { icon: 'github', link: 'https://github.com/KyleBing/zectrix-note4c-display' },
     ],
     search: { provider: 'local' },
     footer: {
-      message: 'ZECTRIX NOTE4C · 四色墨水屏开放固件',
+      message: 'Carte · ZECTRIX NOTE4C 四色墨水屏开放固件',
       copyright: `${DOC_VERSION} · ${APP_AUTHOR}`,
     },
     nav: [

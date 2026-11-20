@@ -4,6 +4,7 @@
 #include "app_wifi.h"
 #include "app_battery.h"
 #include "app_theme.h"
+#include "app_footer.h"
 #include "app_version.h"
 
 #include <HTTPClient.h>
@@ -145,7 +146,7 @@ bool diaryFetchById(const char *diary_id, DiaryDetail &out) {
   out.content = String(data["content"] | "");
   out.category = String(data["category"] | "");
   out.date = String(data["date"] | "");
-  out.message = "ok";
+  out.message = "OK";
   return true;
 }
 
@@ -184,12 +185,7 @@ void diaryDrawPage(EpdSsd2683 &epd, const DiaryDetail &diary, const char *status
     fontDrawTextWrapped(epd, Theme::MarginX, y, 384, Theme::FooterY - 4, "(empty)", Theme::Fg);
   }
 
-  epd.drawHLine(Theme::MarginX, Theme::FooterY, 384, Theme::Fg);
-  epd.drawText(Theme::MarginX, 282, "BOOT:refresh  DN:next  UP:prev  hold:web/off", Theme::Fg);
-  char ver[24];
-  snprintf(ver, sizeof(ver), "%s(%d)", APP_VERSION, APP_BUILD);
-  const int ver_w = (int)strlen(ver) * 6;
-  epd.drawText(400 - Theme::MarginX - ver_w, 282, ver, Theme::Fg);
+  footerDraw(epd, "refresh");
   epd.display();
 }
 
@@ -223,6 +219,6 @@ bool diaryRefreshAndDraw(EpdSsd2683 &epd) {
     diaryDrawPage(epd, d, "err");
     return false;
   }
-  diaryDrawPage(epd, d, "ok");
+  diaryDrawPage(epd, d, "OK");
   return true;
 }

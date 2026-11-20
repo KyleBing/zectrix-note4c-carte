@@ -43,7 +43,7 @@
                 <use xlink:href="#path-2"></use>
             </mask>
             <use id="Rectangle" fill="#EFEFF4" xlink:href="#path-2"></use>
-            <rect id="Rectangle" fill="#8E8E93" mask="url(#mask-3)" x="2.84217094e-14" y="2.84217094e-14" width="440" height="335"></rect>
+            <rect id="Rectangle" fill="#4A4A4A" mask="url(#mask-3)" x="2.84217094e-14" y="2.84217094e-14" width="440" height="335"></rect>
             <rect id="Rectangle-Copy-2" fill="#FFFFFF" mask="url(#mask-3)" x="2.84217094e-14" y="335" width="440" height="335"></rect>
             <rect id="Rectangle-Copy" fill="#FF3B30" mask="url(#mask-3)" x="440" y="2.84217094e-14" width="440" height="335"></rect>
             <rect id="Rectangle-Copy-3" fill="#FFCC00" mask="url(#mask-3)" x="440" y="335" width="440" height="335"></rect>

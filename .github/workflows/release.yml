@@ -32,7 +32,7 @@ jobs:
 
       - name: Build firmware
         working-directory: firmware
-        run: pio run -e note4c
+        run: pio run -e carte
 
       - name: Package artifacts
         id: pkg
@@ -43,13 +43,13 @@ jobs:
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-          BUILD="firmware/.pio/build/note4c"
+          BUILD="firmware/.pio/build/carte"
           OUT="dist"
           mkdir -p "$OUT"
 
           # bootloader + partitions + app（16MB / default_16MB）
           esptool.py --chip esp32s3 merge_bin \
-            -o "$OUT/note4c-${TAG}-merged.bin" \
+            -o "$OUT/note4c-carte-${TAG}-merged.bin" \
             --flash_mode qio \
             --flash_freq 80m \
             --flash_size 16MB \
@@ -57,7 +57,7 @@ jobs:
             0x8000 "$BUILD/partitions.bin" \
             0x10000 "$BUILD/firmware.bin"
 
-          cp "$BUILD/firmware.bin" "$OUT/note4c-${TAG}-firmware.bin"
+          cp "$BUILD/firmware.bin" "$OUT/note4c-carte-${TAG}-firmware.bin"
           ls -lh "$OUT"
 
       - name: Build release notes
@@ -65,9 +65,9 @@ jobs:
           TAG="${{ steps.pkg.outputs.tag }}"
           export TAG
           {
-            echo "## NOTE4C ${TAG}"
+            echo "## Carte ${TAG}"
             echo ""
-            echo "硬件自检固件：串口 + 四色墨水屏状态页。"
+            echo "ZECTRIX NOTE4C 四色墨水屏开放固件（多 App + Web 配网）。"
             echo ""
             echo "---"
             echo ""
@@ -78,11 +78,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.pkg.outputs.tag }}
-          name: NOTE4C ${{ steps.pkg.outputs.tag }}
+          name: Carte ${{ steps.pkg.outputs.tag }}
           body_path: release-body.md
           files: |
-            dist/note4c-${{ steps.pkg.outputs.tag }}-merged.bin
-            dist/note4c-${{ steps.pkg.outputs.tag }}-firmware.bin
+            dist/note4c-carte-${{ steps.pkg.outputs.tag }}-merged.bin
+            dist/note4c-carte-${{ steps.pkg.outputs.tag }}-firmware.bin
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

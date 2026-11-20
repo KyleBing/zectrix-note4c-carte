@@ -25,6 +25,9 @@ class EpdSsd2683 {
   void drawHLine(int x, int y, int w, EpdColor color);
   void drawVLine(int x, int y, int h, EpdColor color);
   void drawRect(int x, int y, int w, int h, EpdColor color);
+  void fillTriangle(int x0, int y0, int x1, int y1, int x2, int y2, EpdColor color);
+  void drawCircle(int cx, int cy, int r, EpdColor color);
+  void fillCircle(int cx, int cy, int r, EpdColor color);
   // 6x8 glyph; returns advance in pixels
   int drawChar(int x, int y, char c, EpdColor fg, EpdColor bg = EPD_WHITE);
   void drawText(int x, int y, const char *text, EpdColor fg, EpdColor bg = EPD_WHITE);

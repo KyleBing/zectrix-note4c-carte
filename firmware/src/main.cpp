@@ -1,9 +1,10 @@
 /**
- * NOTE4C — multi-app board (todo / weather / album) + WiFi/Web config
+ * Carte — multi-app board (todo / calendar / weather / album) + WiFi/Web config
+ * Hardware: ZECTRIX NOTE4C
  *
  * Keys (outside web config):
- *   DOWN short       → next app (1→2→3)
- *   UP short         → prev app (3→2→1)
+ *   DOWN short(s)    → next app(s); multi-click within combo window skips N
+ *   UP short(s)      → prev app(s); same combo window as BOOT/album
  *   UP hold ~1.5s    → config web
  *   DOWN hold ~3s    → power off
  *   BOOT release     → in-app ONLY (never switches App)
@@ -22,6 +23,7 @@
 #include "app_wifi.h"
 #include "app_web.h"
 #include "app_todo.h"
+#include "app_calendar.h"
 #include "app_weather.h"
 #include "app_album.h"
 #include "app_apps.h"
@@ -29,6 +31,7 @@
 #include "app_led.h"
 #include "app_power.h"
 #include "app_battery.h"
+#include "app_rtc.h"
 #include "app_version.h"
 
 static EpdSsd2683 epd;
@@ -71,7 +74,17 @@ static void persistUi() {
 
 static void suppressKeys(uint32_t ms) {
   g_ignore_keys_until = millis() + ms;
-  powerClearShortPress();
+  powerClearDownClicks();
+}
+
+static void skipApps(int steps) {
+  if (steps == 0) return;
+  if (steps > 0) {
+    for (int i = 0; i < steps; i++) g_app = appIdNext(g_app);
+  } else {
+    for (int i = 0; i < -steps; i++) g_app = appIdPrev(g_app);
+  }
+  if (g_app == AppId::Weather) g_weather_mode = WeatherMode::Now;
 }
 
 static void drawConfigWebPage(bool ok, bool forced_ap) {
@@ -105,10 +118,10 @@ static void drawConfigWebPage(bool ok, bool forced_ap) {
   } else {
     y = fontDrawTextWrapped(epd, 8, y, 384, 260, "请与手机连同一 WiFi，浏览器打开上面的地址", Theme::Fg);
   }
-  y = fontDrawTextWrapped(epd, 8, y + 8, 384, 260, "页面：状态、WiFi、鉴权、待办、天气、相册", Theme::Fg);
+  y = fontDrawTextWrapped(epd, 8, y + 8, 384, 260, "页面：状态、设置、WiFi、鉴权、待办、天气、相册", Theme::Fg);
   y = fontDrawTextWrapped(epd, 8, y + 4, 384, 260, "长按上键：强制开热点", Theme::Fg);
   y = fontDrawTextWrapped(epd, 8, y, 384, 260, "BOOT 键：退出配置，返回应用", Theme::Fg);
-  y = fontDrawTextWrapped(epd, 8, y, 384, 260, "长按下键约 3 秒：关机", Theme::Fg);
+  y = fontDrawTextWrapped(epd, 8, y, 384, 260, "长按下键约 3 秒：关机；再按下键开机", Theme::Fg);
   const uint32_t idle = getAppConfig().idle_off_sec;
   if (idle == 0) {
     fontDrawTextWrapped(epd, 8, y, 384, 260, "无操作自动关机：关闭（配置页期间不会关）", Theme::Fg);
@@ -120,12 +133,18 @@ static void drawConfigWebPage(bool ok, bool forced_ap) {
 }
 
 static bool showCurrentApp(bool refresh) {
+  if (!appIdEnabled(g_app)) {
+    g_app = appIdFirstEnabled();
+    Serial.printf("[UI] snap to enabled app=%s\n", appIdName(g_app));
+  }
   Serial.printf("[UI] app=%s refresh=%d boot=%d up=%d dn=%d\n", appIdName(g_app), (int)refresh,
                 digitalRead(PIN_BTN_BOOT) == LOW, digitalRead(PIN_BTN_UP) == LOW,
                 digitalRead(PIN_BTN_DOWN) == LOW);
   switch (g_app) {
     case AppId::Todo:
       return todoRefreshAndDraw(epd);
+    case AppId::Calendar:
+      return calendarShow(epd);
     case AppId::Weather:
       if (refresh) g_weather_mode = weatherModeNext(g_weather_mode);
       Serial.printf("[UI] weather mode=%s\n", weatherModeName(g_weather_mode));
@@ -159,7 +178,7 @@ void setup() {
 
   Serial.begin(115200);
   delay(600);
-  Serial.printf("======== NOTE4C apps %s(%d) ========\n", APP_VERSION, APP_BUILD);
+  Serial.printf("======== Carte %s(%d) ========\n", APP_VERSION, APP_BUILD);
   Serial.printf("[BOOT] reset_reason=%d\n", (int)esp_reset_reason());
 
   ledBegin();
@@ -181,8 +200,7 @@ void setup() {
   delay(30);
   Serial.printf("[I2C] RTC=%s NFC=%s ES=%s\n", i2cAck(I2C_ADDR_RTC) ? "OK" : "--",
                 i2cAck(I2C_ADDR_NFC) ? "OK" : "--", i2cAck(I2C_ADDR_ES8311) ? "OK" : "--");
-
-  ledSet(LedPattern::BlinkSlow);
+  rtcBegin();  // 从 PCF8563 灌入系统时间；复位后下次联网会再 NTP 一次
 
   uint8_t saved_app = 0, saved_wx = 0;
   int saved_alb = 0;
@@ -198,10 +216,14 @@ void setup() {
     g_app = AppId::Todo;
     g_weather_mode = WeatherMode::Now;
   }
+  if (!appIdEnabled(g_app)) {
+    g_app = appIdFirstEnabled();
+    Serial.printf("[UI] disabled restore -> %s\n", appIdName(g_app));
+  }
 
-  showCurrentApp(false);
+  // 上电不刷屏（墨水屏保留上一帧）；快闪 3 下表示已开机
+  ledBootFlash();
   powerIdleSetTimeoutSec(getAppConfig().idle_off_sec);
-  ledOff();
   suppressKeys(500);  // ignore boot bounce after power-on
 }
 
@@ -209,6 +231,8 @@ void loop() {
   static uint32_t up_since = 0;
   static bool up_prev = false;
   static bool up_long_done = false;
+  static uint8_t up_clicks = 0;
+  static uint32_t up_last_ms = 0;
   static bool busy = false;
 
   powerPoll(true);
@@ -226,11 +250,12 @@ void loop() {
     up_since = 0;
     up_long_done = false;
     up_prev = up;
-    powerClearShortPress();
+    up_clicks = 0;
+    powerClearDownClicks();
     return;
   }
 
-  auto finishBootAction = [&](bool ok) {
+  auto finishAction = [&](bool ok) {
     ledSet(ok ? LedPattern::Off : LedPattern::ErrorBurst);
     persistUi();
     if (ledGet() == LedPattern::ErrorBurst) {
@@ -244,6 +269,7 @@ void loop() {
     }
     up_since = 0;
     up_long_done = false;
+    up_clicks = 0;
     up_prev = digitalRead(PIN_BTN_UP) == LOW;
     suppressKeys(80);
     busy = false;
@@ -258,9 +284,11 @@ void loop() {
       webStop();
       const bool ok = showCurrentApp(false);
       if (g_app != stayed) g_app = stayed;
-      finishBootAction(ok);
+      finishAction(ok);
       return;
     }
+    powerClearDownClicks();
+    up_clicks = 0;
   } else if (!busy) {
     const uint8_t n = powerTakeBootBurst();
     if (n) {
@@ -285,14 +313,14 @@ void loop() {
         Serial.printf("[UI] BUG app mutated %s -> %s, revert\n", appIdName(stayed), appIdName(g_app));
         g_app = stayed;
       }
-      finishBootAction(ok);
+      finishAction(ok);
       return;
     }
   }
 
   const bool keys_blocked = busy || (millis() < g_ignore_keys_until);
   if (keys_blocked) {
-    // Keep edge detectors in sync but do not act
+    // Keep edge detectors in sync but do not act / accumulate
     if (!up) {
       up_since = 0;
       up_long_done = false;
@@ -301,11 +329,12 @@ void loop() {
       up_long_done = false;
     }
     up_prev = up;
-    powerClearShortPress();
+    up_clicks = 0;
+    powerClearDownClicks();
     return;
   }
 
-  // UP: long → web; short → previous app
+  // UP: long → web; short releases accumulate → prev app(s) after combo quiet
   if (up) {
     if (up_since == 0) {
       up_since = millis();
@@ -313,6 +342,8 @@ void loop() {
     }
     if (!up_long_done && (millis() - up_since > 1500)) {
       up_long_done = true;
+      up_clicks = 0;
+      powerClearDownClicks();
       busy = true;
       ledAckFlash();
       ledSet(LedPattern::BlinkSlow);
@@ -331,30 +362,8 @@ void loop() {
     if (up_prev && !up_long_done && up_since != 0) {
       const uint32_t held = millis() - up_since;
       if (held >= 40 && !in_web) {
-        busy = true;
-        ledSet(LedPattern::Breathe);
-        g_app = appIdPrev(g_app);
-        if (g_app == AppId::Weather) g_weather_mode = WeatherMode::Now;
-        Serial.printf("[UI] UP short -> %s (%d/%d) [THIS switches app, not BOOT]\n",
-                      appIdName(g_app), static_cast<int>(g_app) + 1,
-                      static_cast<int>(AppId::Count));
-        const bool ok = showCurrentApp(false);
-        persistUi();
-        ledSet(ok ? LedPattern::Off : LedPattern::ErrorBurst);
-        if (!ok) {
-          const uint32_t t = millis();
-          while (millis() - t < 1200) {
-            ledUpdate();
-            delay(10);
-          }
-          ledOff();
-        }
-        suppressKeys(500);
-        busy = false;
-        up_since = 0;
-        up_long_done = false;
-        up_prev = false;
-        return;
+        if (up_clicks < 40) up_clicks++;
+        up_last_ms = millis();
       }
     }
     up_since = 0;
@@ -362,28 +371,31 @@ void loop() {
   }
   up_prev = up;
 
-  // DOWN short → next app
-  if (!in_web && powerConsumeShortPress()) {
+  if (!in_web && !busy && !up && up_clicks > 0 &&
+      (millis() - up_last_ms >= POWER_KEY_COMBO_MS)) {
+    const uint8_t n = up_clicks;
+    up_clicks = 0;
     busy = true;
     ledSet(LedPattern::Breathe);
-    g_app = appIdNext(g_app);
-    if (g_app == AppId::Weather) g_weather_mode = WeatherMode::Now;
-    Serial.printf("[UI] DOWN short -> %s (%d/%d)\n", appIdName(g_app),
-                  static_cast<int>(g_app) + 1, static_cast<int>(AppId::Count));
+    skipApps(-(int)n);
+    Serial.printf("[UI] UP x%u -> %s\n", (unsigned)n, appIdName(g_app));
     const bool ok = showCurrentApp(false);
-    persistUi();
-    ledSet(ok ? LedPattern::Off : LedPattern::ErrorBurst);
-    if (!ok) {
-      const uint32_t t = millis();
-      while (millis() - t < 1200) {
-        ledUpdate();
-        delay(10);
-      }
-      ledOff();
+    finishAction(ok);
+    return;
+  }
+
+  // DOWN short(s) → next app(s) after combo quiet (same as BOOT/album)
+  if (!in_web && !busy) {
+    const uint8_t n = powerTakeDownBurst();
+    if (n) {
+      busy = true;
+      ledSet(LedPattern::Breathe);
+      skipApps((int)n);
+      Serial.printf("[UI] DOWN x%u -> %s\n", (unsigned)n, appIdName(g_app));
+      const bool ok = showCurrentApp(false);
+      finishAction(ok);
     }
-    suppressKeys(500);
-    busy = false;
   } else if (in_web) {
-    powerClearShortPress();
+    powerClearDownClicks();
   }
 }

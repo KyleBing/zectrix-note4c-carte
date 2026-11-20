@@ -4,6 +4,7 @@
 #include "app_wifi.h"
 #include "app_battery.h"
 #include "app_header.h"
+#include "app_footer.h"
 #include "app_version.h"
 
 #include <cstdio>
@@ -152,12 +153,7 @@ void todoDrawPage(EpdSsd2683 &epd, const DiaryDetail &diary, const char *status_
     }
   }
 
-  epd.drawHLine(8, footer_y, 384, EPD_BLACK);
-  epd.drawText(8, 282, "BOOT:refresh  DN:next  UP:prev  hold:web/off", EPD_BLACK);
-  char ver[24];
-  snprintf(ver, sizeof(ver), "%s(%d)", APP_VERSION, APP_BUILD);
-  const int ver_w = (int)strlen(ver) * 6;
-  epd.drawText(400 - 8 - ver_w, 282, ver, EPD_BLACK);
+  footerDraw(epd, "refresh");
   epd.display();
 }
 
@@ -169,7 +165,7 @@ bool todoRefreshAndDraw(EpdSsd2683 &epd) {
 
   if (!wifiIsStaConnected()) {
     if (!hasSavedWifiConfig()) {
-      d.message = "No WiFi. UP=config web / AP note4c";
+      d.message = "No WiFi. UP=config web / AP Note4C-Carte";
       todoDrawPage(epd, d, "no-wifi");
       return false;
     }
@@ -200,7 +196,7 @@ bool todoRefreshAndDraw(EpdSsd2683 &epd) {
     return false;
   }
 
-  snprintf(status, sizeof(status), "ok");
+  snprintf(status, sizeof(status), "OK");
   todoDrawPage(epd, d, status);
   return true;
 }

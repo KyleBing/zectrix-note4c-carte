@@ -32,6 +32,10 @@ struct AppConfig {
 
   uint32_t idle_off_sec;  // 无操作自动关机秒数；0=关闭。Web 配置期间不关
   bool album_show_header; // 设备相册展示时是否叠标题栏；默认 true
+  bool week_start_monday; // 日历一周起始：true=周一，false=周日；默认 true
+  int16_t tz_offset_min;  // 时区相对 UTC 分钟数；默认 480（UTC+8）
+  uint16_t ntp_interval_days; // NTP 周期天数；默认 30（复位后仍会校一次）
+  uint8_t apps_enabled;   // bit i = AppId i 是否启用；默认全开
 
   // 天气：设备只存位置；和风 JWT/Key 在 Portal-go 服务端
   // host/key 字段保留兼容旧配置，设备端请求不再使用
@@ -62,6 +66,11 @@ bool saveQWeatherConfig(bool enabled, const char *host, const char *key, const c
 bool qweatherConfigured();
 bool saveIdleOffSec(uint32_t sec);
 bool saveAlbumShowHeader(bool show);
+bool saveWeekStartMonday(bool monday);
+bool saveTimezoneOffsetMin(int16_t minutes);
+bool saveNtpIntervalDays(uint16_t days);
+bool saveAppsEnabled(uint8_t mask);
+bool setAppEnabled(uint8_t app_id, bool enabled);  // 至少保留一个
 
 String appConfigToJson(bool mask_secrets = false);
 bool appConfigFromJson(const char *json);

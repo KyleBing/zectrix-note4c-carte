@@ -2,7 +2,7 @@
 
 #include "epd_ssd2683.h"
 
-// NOTE4C 四色主调（墨水屏可用色：黑 / 白 / 黄 / 红）
+// Carte 四色主调（墨水屏可用色：黑 / 白 / 黄 / 红）
 //   背景 WHITE · 正文 BLACK · 强调/状态 YELLOW · 警示/标题 RED
 namespace Theme {
 constexpr EpdColor Bg = EPD_WHITE;

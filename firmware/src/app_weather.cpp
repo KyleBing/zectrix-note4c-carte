@@ -4,6 +4,7 @@
 #include "app_wifi.h"
 #include "app_header.h"
 #include "app_theme.h"
+#include "app_footer.h"
 #include "app_version.h"
 
 #include <HTTPClient.h>
@@ -364,33 +365,37 @@ static void formatObsLabel(const String &obs, char *out, size_t n) {
   formatHourlyLabel(obs, out, n);
 }
 
-static void drawWeatherHeader(EpdSsd2683 &epd, const char *title, const char *status) {
-  const int bat_left = headerDrawAppBar(epd, AppId::Weather, title);
+static void drawWeatherHeader(EpdSsd2683 &epd, WeatherMode mode, const char *status) {
+  // title/location may include CJK — must use HZK font, not 6x8 drawText (else ???)
+  const int bat_left = headerDrawAppBar(epd, AppId::Weather, nullptr);
   const AppConfig &cfg = getAppConfig();
-  // location after short title area; keep clear of slot+battery on the right
+  char head[96];
   if (cfg.qweather_location_name[0]) {
-    const int loc_x = Theme::MarginX + (int)strlen(title ? title : "") * 6 + 8;
-    if (loc_x + 36 < bat_left - 48) {
-      epd.drawText(loc_x, 7, cfg.qweather_location_name, Theme::HeaderAccent, Theme::HeaderBg);
-    }
+    snprintf(head, sizeof(head), "天气 %s · %s", weatherModeName(mode), cfg.qweather_location_name);
+  } else {
+    snprintf(head, sizeof(head), "天气 %s", weatherModeName(mode));
   }
-  if (status && status[0] && bat_left - 48 > 200) {
-    epd.drawText(200, 7, status, Theme::HeaderAccent, Theme::HeaderBg);
+  const int title_max = bat_left - Theme::MarginX - 40;
+  if (title_max > 40) {
+    fontDrawTextWrapped(epd, Theme::MarginX, 3, title_max, Theme::HeaderH, head, Theme::HeaderFg,
+                        Theme::HeaderBg);
+  }
+  if (status && status[0]) {
+    const int sw = (int)strlen(status) * 6;
+    const int sx = bat_left - 8 - sw;
+    if (sx > Theme::MarginX + 24) {
+      epd.drawText(sx, 7, status, Theme::HeaderAccent, Theme::HeaderBg);
+    }
   }
 }
 
 static void drawWeatherFooter(EpdSsd2683 &epd) {
-  epd.drawHLine(Theme::MarginX, Theme::FooterY, 384, Theme::Fg);
-  epd.drawText(Theme::MarginX, 282, "BOOT:mode  DN:next  UP:prev  hold:web/off", Theme::Fg);
-  char ver[24];
-  snprintf(ver, sizeof(ver), "%s(%d)", APP_VERSION, APP_BUILD);
-  const int ver_w = (int)strlen(ver) * 6;
-  epd.drawText(400 - Theme::MarginX - ver_w, 282, ver, Theme::Fg);
+  footerDraw(epd, "mode");
 }
 
-static void drawErrorPage(EpdSsd2683 &epd, const char *title, const char *msg, const char *status) {
+static void drawErrorPage(EpdSsd2683 &epd, WeatherMode mode, const char *msg, const char *status) {
   epd.clear(Theme::Bg);
-  drawWeatherHeader(epd, title, status);
+  drawWeatherHeader(epd, mode, status);
   fontDrawTextWrapped(epd, Theme::MarginX, 36, 384, Theme::FooterY - 4,
                       msg ? msg : "(error)", Theme::Fg);
   drawWeatherFooter(epd);
@@ -399,7 +404,7 @@ static void drawErrorPage(EpdSsd2683 &epd, const char *title, const char *msg, c
 
 void weatherDrawNow(EpdSsd2683 &epd, const WeatherNowData &d, const char *status) {
   epd.clear(Theme::Bg);
-  drawWeatherHeader(epd, "WEATHER NOW", status);
+  drawWeatherHeader(epd, WeatherMode::Now, status);
   if (!d.ok) {
     fontDrawTextWrapped(epd, Theme::MarginX, 36, 384, Theme::FooterY - 4,
                         d.message.length() ? d.message.c_str() : "(error)", Theme::Fg);
@@ -430,7 +435,7 @@ void weatherDrawNow(EpdSsd2683 &epd, const WeatherNowData &d, const char *status
 
 void weatherDrawHourly(EpdSsd2683 &epd, const WeatherHourlyData &d, const char *status) {
   epd.clear(Theme::Bg);
-  drawWeatherHeader(epd, "WEATHER 12H", status);
+  drawWeatherHeader(epd, WeatherMode::Hour12, status);
   if (!d.ok || d.count <= 0) {
     fontDrawTextWrapped(epd, Theme::MarginX, 36, 384, Theme::FooterY - 4,
                         d.message.length() ? d.message.c_str() : "(no hourly)", Theme::Fg);
@@ -463,9 +468,7 @@ void weatherDrawHourly(EpdSsd2683 &epd, const WeatherHourlyData &d, const char *
 void weatherDrawForecast(EpdSsd2683 &epd, const WeatherDailyData &d, WeatherMode mode,
                          const char *status) {
   epd.clear(Theme::Bg);
-  char title[24];
-  snprintf(title, sizeof(title), "WEATHER %s", weatherModeName(mode));
-  drawWeatherHeader(epd, title, status);
+  drawWeatherHeader(epd, mode, status);
   if (!d.ok || d.count <= 0) {
     fontDrawTextWrapped(epd, Theme::MarginX, 36, 384, Theme::FooterY - 4,
                         d.message.length() ? d.message.c_str() : "(error)", Theme::Fg);
@@ -512,37 +515,37 @@ void weatherDrawForecast(EpdSsd2683 &epd, const WeatherDailyData &d, WeatherMode
 bool weatherShowMode(EpdSsd2683 &epd, WeatherMode mode) {
   if (!epd.ok()) return false;
   if (!qweatherConfigured()) {
-    drawErrorPage(epd, "WEATHER",
+    drawErrorPage(epd, mode,
                   "Need portal login + location.\nWeb: /auth then /weather\n(server holds QWeather keys)",
                   "cfg");
-    return false;
+    return true;  // UI 已按 mode 刷新；BOOT 切换应看到标题变化，勿 ErrorBurst
   }
 
   switch (mode) {
     case WeatherMode::Now: {
       WeatherNowData d;
       const bool ok = weatherFetchNow(d);
-      weatherDrawNow(epd, d, ok ? "ok" : "err");
-      return ok;
+      weatherDrawNow(epd, d, ok ? "OK" : "err");
+      return true;
     }
     case WeatherMode::Hour12: {
       WeatherHourlyData d;
       const bool ok = weatherFetchHourly("24h", d);  // API min 24h; UI shows first 12
-      weatherDrawHourly(epd, d, ok ? "ok" : "err");
-      return ok;
+      weatherDrawHourly(epd, d, ok ? "OK" : "err");
+      return true;
     }
     case WeatherMode::Week7: {
       WeatherDailyData d;
       const bool ok = weatherFetchDaily("7d", d);
-      weatherDrawForecast(epd, d, mode, ok ? "ok" : "err");
-      return ok;
+      weatherDrawForecast(epd, d, mode, ok ? "OK" : "err");
+      return true;
     }
     case WeatherMode::Week14: {
       WeatherDailyData d;
       const bool ok = weatherFetchDaily("15d", d);
       if (ok && d.count > 14) d.count = 14;  // show 14 days
-      weatherDrawForecast(epd, d, mode, ok ? "ok" : "err");
-      return ok;
+      weatherDrawForecast(epd, d, mode, ok ? "OK" : "err");
+      return true;
     }
     default:
       return false;

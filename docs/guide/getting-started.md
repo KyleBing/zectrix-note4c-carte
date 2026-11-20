@@ -1,5 +1,6 @@
-# NOTE4C 从零开发指南
+# Carte 从零开发指南
 
+> 固件名：**Carte** · 目标硬件：ZECTRIX NOTE4C  
 > 目标：自己写应用逻辑；显示等底层驱动尽量复用 Wiki 指向的现成方案。  
 > 硬件参数见：[硬件参数](/hardware/note4c)（**§2 硬件能力一览**、bpp、四色成像原理）
 
@@ -20,7 +21,7 @@
 
 ## 2. 和 Sparks / Cardputer 有什么不一样？
 
-| | Sparks（Cardputer） | 本仓库 NOTE4C |
+| | Sparks（Cardputer） | 本仓库 Carte（NOTE4C 硬件） |
 | --- | --- | --- |
 | 工程形态 | PlatformIO + **Arduino** | 当前自检固件同样是 **PlatformIO + Arduino** |
 | 板级库 | `M5Cardputer` / `M5Unified` 一把梭 | **没有**官方 Arduino 板级库；引脚自己写（`board.h`） |

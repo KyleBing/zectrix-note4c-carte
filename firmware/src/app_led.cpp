@@ -10,7 +10,7 @@ static int g_last_level = -1;
 static inline void ledWrite(bool on) {
   const int level = on ? LED_ON_LEVEL : LED_OFF_LEVEL;
   if (level == g_last_level) return;
-  // Official NOTE4C BSP uses gpio_hold; must release before driving.
+  // Official NOTE4C BSP uses gpio_hold; must release before driving (Carte board).
   gpio_hold_dis((gpio_num_t)PIN_LED);
   digitalWrite(PIN_LED, level);
   g_last_level = level;
@@ -43,6 +43,18 @@ void ledAckFlash() {
     g_last_level = -1;
     ledWrite(true);
     delay(70);
+  }
+}
+
+void ledBootFlash() {
+  g_pat = LedPattern::Off;
+  for (int i = 0; i < 3; i++) {
+    g_last_level = -1;
+    ledWrite(true);
+    delay(80);
+    g_last_level = -1;
+    ledWrite(false);
+    delay(80);
   }
 }
 

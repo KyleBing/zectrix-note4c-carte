@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# 刷 NOTE4C：编译并上传固件（可选字库 / 串口监视）
+# 刷 Carte：编译并上传固件（可选字库 / 串口监视）
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 FW="$ROOT/firmware"
-ENV=note4c
+ENV=carte
 
 usage() {
   cat <<'EOF'

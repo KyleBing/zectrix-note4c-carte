@@ -2,25 +2,27 @@
 
 #include <Arduino.h>
 
+// Quiet window after last short-release before a multi-click burst is taken
+// (BOOT album/weather skip, UP/DOWN app skip).
+static constexpr uint32_t POWER_KEY_COMBO_MS = 180;
+
 void powerBegin();
 
-// Call often (loop + blocking waits). If DOWN held ~3s → release PWR_HOLD and halt.
-// latch_short=true also latches a short-release for app switching.
+// Call often (loop + blocking waits). If DOWN held ~3s → soft off (deep sleep).
+// latch_short=true counts short DOWN releases into the combo burst.
 // During EPD refresh pass latch_short=false so bumps don't queue as app switches.
 void powerPoll(bool latch_short = true);
 
-// True once after a short DOWN release (not after long-hold power-off path).
-bool powerConsumeShortPress();
+// DOWN short-release combo (same timing as BOOT).
+uint8_t powerTakeDownBurst();  // 0 until quiet POWER_KEY_COMBO_MS after last click
+void powerClearDownClicks();
 
-// Drop any latched short press without acting on it.
-void powerClearShortPress();
-
-// BOOT releases: counted even during EPD waitBusy (powerPoll). Combo window 500ms.
-uint8_t powerTakeBootBurst();      // 0 until 500ms quiet after last click
+// BOOT releases: counted even during EPD waitBusy (powerPoll).
+uint8_t powerTakeBootBurst();      // 0 until quiet after last click
 uint8_t powerTakeBootClicksNow();  // drain immediately (web exit)
 bool powerBootHeld();
 
-// Immediate soft power-off (release latch). USB may keep board alive.
+// Soft power-off: release PWR_HOLD, deep sleep; press DOWN to wake (full reboot).
 void powerOffNow();
 
 // Firmware idle auto-off (0 = disabled). Not a SoC default.

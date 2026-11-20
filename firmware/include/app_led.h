@@ -20,3 +20,5 @@ void ledUpdate();  // call from loop()
 void ledOff();
 // Distinctive blink even while a key is still held (long-press threshold reached).
 void ledAckFlash();
+// Power-on cue: three fast blinks (blocking), then off. No EPD refresh.
+void ledBootFlash();

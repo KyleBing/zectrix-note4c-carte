@@ -2,6 +2,7 @@
 #include "app_config.h"
 #include "app_power.h"
 #include "app_led.h"
+#include "app_rtc.h"
 
 #include <WiFi.h>
 #include <cstring>
@@ -74,6 +75,7 @@ bool wifiConnectSaved(uint32_t timeout_ms) {
       if (strcmp(cfg.wifi_active, p.ssid) != 0) {
         setAppConfigWifiActive(p.ssid);
       }
+      rtcSyncOnWifiConnected(8000);  // 复位后 / RTC 无效 / 超过周期才 NTP
       return true;
     }
   }

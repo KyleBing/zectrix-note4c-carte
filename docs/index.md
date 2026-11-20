@@ -2,12 +2,12 @@
 layout: home
 
 hero:
-  name: NOTE4C Display
+  name: Carte
   text: 四色墨水屏开放固件
   tagline: ZECTRIX NOTE4C · ESP32-S3 · SSD2683 BWRY · PlatformIO Arduino
   image:
     src: /assets/appicon-sketch.svg
-    alt: NOTE4C
+    alt: Carte
   actions:
     - theme: brand
       text: 固件功能
@@ -42,7 +42,7 @@ features:
 | 目标板 | ZECTRIX NOTE4C Devkit（PCB 1.0） |
 | 主控 | ESP32-S3 N16R8（16 MB Flash / 8 MB PSRAM） |
 | 显示 | 4.2″ 400×300 黑 / 白 / 红 / 黄，SSD2683，2 bpp |
-| 工程 | `firmware/` · env `note4c` |
+| 固件 | **Carte** · `firmware/` · env `carte` |
 
 ```bash
 cd firmware

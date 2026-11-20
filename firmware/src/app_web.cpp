@@ -1,5 +1,6 @@
 #include "app_web.h"
 #include "app_config.h"
+#include "app_apps.h"
 #include "app_wifi.h"
 #include "app_diary.h"
 #include "app_todo.h"
@@ -8,19 +9,21 @@
 #include "app_album.h"
 #include "app_version.h"
 #include "app_power.h"
+#include "app_rtc.h"
 
 #include <WebServer.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
 #include <FS.h>
 #include <LittleFS.h>
+#include <cstdio>
 
 static WebServer g_server(80);
 static bool g_running = false;
 static bool g_ap = false;
 static char g_url[40] = "";
 
-enum class NavTab : uint8_t { Status, Wifi, Auth, Todo, Weather, Album };
+enum class NavTab : uint8_t { Status, Settings, Wifi, Auth, Todo, Weather, Album };
 
 static const char *kCss = R"CSS(
 *{box-sizing:border-box}
@@ -87,6 +90,11 @@ pre{white-space:pre-wrap;background:#f7f7f5;padding:12px;border-radius:8px;font-
 .geo-list label{display:flex;gap:10px;align-items:flex-start;margin:0;cursor:pointer;color:#1a1a1a;font-size:14px;font-weight:500}
 .geo-list input{width:auto;margin:3px 0 0;accent-color:#1a1a1a}
 .geo-list .sub{display:block;margin-top:2px;font-size:12px;color:#888;font-weight:400}
+.check-row{display:flex;align-items:center;gap:12px;padding:14px 16px;border:2px solid #1a1a1a;border-radius:10px;background:#fff;cursor:pointer;margin:4px 0 16px;user-select:none}
+.check-row input{width:22px;height:22px;margin:0;accent-color:#0a7a4b;flex-shrink:0}
+.check-row span{font-size:16px;font-weight:650;color:#1a1a1a}
+.check-row.on,.check-row:has(input:checked){background:#e8f7ef;border-color:#0a7a4b}
+.check-row.on span,.check-row:has(input:checked) span{color:#0a7a4b}
 body.page-album{overflow-x:hidden;overflow-y:auto;min-height:100vh;background:#e8e6e0}
 body.page-album main{max-width:none;width:100%;margin:0;padding:0;display:block}
 .ed-shell{display:flex;flex-direction:column;min-width:0;background:#fff}
@@ -148,21 +156,37 @@ body.page-album main{max-width:none;width:100%;margin:0;padding:0;display:block}
 .ed-album{padding:14px 12px 24px;background:#f0eee8;flex:0 0 auto}
 .ed-album-h{display:flex;align-items:baseline;gap:10px;margin-bottom:10px;flex-wrap:wrap}
 .ed-album-h h2{margin:0;font-size:14px}
-.ed-saved{display:flex;flex-direction:column;gap:8px;overflow:visible;padding-bottom:4px}
-.thumb{display:flex;flex-wrap:wrap;align-items:center;gap:10px;border:1px solid #ccc;padding:8px;background:#fff;width:auto;max-width:100%;box-sizing:border-box}
+.ed-saved{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;overflow:visible;padding-bottom:4px}
+.thumb{border:1px solid #ccc;padding:6px;background:#fff;width:auto;min-width:0;box-sizing:border-box}
 .thumb.on{border-color:#111;outline:1px solid #111}
 .thumb.off{opacity:.45}
-.thumb canvas{width:200px;max-width:100%;height:auto;aspect-ratio:4/3;image-rendering:pixelated;display:block;background:#fff;cursor:pointer;flex:0 0 auto}
-.thumb .row{display:flex;align-items:center;gap:4px;margin:0;flex:1;min-width:180px;flex-wrap:wrap}
+.thumb canvas{width:100%;height:auto;aspect-ratio:4/3;image-rendering:pixelated;display:block;background:#fff;cursor:pointer}
+.thumb .row{display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap}
+.thumb .row.meta-row{justify-content:space-between}
+.thumb .row.acts{margin-top:4px;gap:6px}
+.thumb .row.acts button{margin:0;padding:4px 8px;font-size:11px;border-radius:0;flex:1}
 .thumb .row code{font-size:10px}
-.show-lab{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:#555;cursor:pointer;user-select:none}
-.show-lab input{width:auto;margin:0;accent-color:#1a1a1a;padding:0}
+.show-lab{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#1a1a1a;cursor:pointer;user-select:none}
+.show-lab input{width:16px;height:16px;margin:0;accent-color:#0a7a4b;padding:0;flex-shrink:0}
 .file-pick{display:flex;flex-direction:row;align-items:center;gap:8px;margin:0;flex-shrink:0}
 .file-cta{position:relative;display:flex;align-items:center;justify-content:center;height:36px;padding:0 16px;background:#1a1a1a;color:#fff;font-size:14px;font-weight:700;cursor:pointer;border:0;overflow:hidden;letter-spacing:.02em}
 .file-cta:hover{background:#333}
 .file-cta input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;padding:0;border:0;margin:0}
 .file-name{display:block;font-size:11px;line-height:1.3;color:#555;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .file-name.empty{color:#aaa}
+.app-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:10px;margin:0}
+.app-card{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:14px 12px;border:1px solid #e4e4e4;border-radius:12px;background:#fafafa;color:#1a1a1a;cursor:pointer;text-align:left;width:100%;font:inherit;box-shadow:none;transition:border-color .15s,background .15s,box-shadow .15s}
+.app-card:hover{border-color:#bbb}
+.app-card.on{border-color:#0a7a4b;background:#e8f7ef;box-shadow:0 0 0 1px #0a7a4b}
+.app-card.off{opacity:.72}
+.app-card .ico{width:36px;height:36px;border-radius:10px;background:#fff;border:1px solid #e8e8e8;display:flex;align-items:center;justify-content:center}
+.app-card.on .ico{border-color:#b7e0c8}
+.app-card .ico svg{width:20px;height:20px;display:block}
+.app-card .name{font-size:15px;font-weight:650;margin:0}
+.app-card .desc{font-size:12px;color:#888;margin:0;line-height:1.35}
+.app-card .st{font-size:11px;font-weight:650;letter-spacing:.02em}
+.app-card.on .st{color:#0a7a4b}
+.app-card.off .st{color:#999}
 )CSS";
 
 static String htmlEscapeAttr(const char *s) {
@@ -187,6 +211,41 @@ static void appendNavLink(String &page, NavTab tab, NavTab active, const char *h
   page += F("</a>");
 }
 
+static void redirectOk(const char *path, const char *code) {
+  String loc = String(path);
+  loc += F("?ok=");
+  loc += code;
+  g_server.sendHeader("Location", loc);
+  g_server.send(303);
+}
+
+static void appendFlashFromQuery(String &b) {
+  if (!g_server.hasArg("ok")) return;
+  const String code = g_server.arg("ok");
+  const char *msg = nullptr;
+  bool err = false;
+  if (code == "power") msg = "电源 / 日历设置已保存";
+  else if (code == "tz") msg = "时区 / NTP 周期已保存";
+  else if (code == "ntp") msg = "NTP 校时完成";
+  else if (code == "ntp_fail") {
+    msg = "NTP 校时失败（需联网）";
+    err = true;
+  } else if (code == "rtc") msg = "已写入 RTC";
+  else if (code == "apps") msg = "应用开关已更新";
+  else if (code == "apps_last") {
+    msg = "至少保留一个应用";
+    err = true;
+  } else if (code == "wifi") msg = "WiFi 已保存";
+  else if (code == "todo") msg = "待办已拉取";
+  else if (code == "weather") msg = "天气开关已保存";
+  else if (code == "pick") msg = "已选用位置";
+  else if (code == "saved") msg = "已保存";
+  if (!msg) return;
+  b += err ? F("<div class='flash err'>") : F("<div class='flash ok'>");
+  b += msg;
+  b += F("</div>");
+}
+
 static void sendHtml(const String &title, NavTab active, const String &body) {
   String page;
   page.reserve(body.length() + 2000);
@@ -201,8 +260,9 @@ static void sendHtml(const String &title, NavTab active, const String &body) {
   page += F("><header>"
             "<div class=brand>"
             "<img class=site-logo src=/favicon.svg alt='' width=28 height=28>"
-            "<h1>NOTE4C</h1></div><nav>");
+            "<h1>Carte</h1></div><nav>");
   appendNavLink(page, NavTab::Status, active, "/", "状态");
+  appendNavLink(page, NavTab::Settings, active, "/settings", "设置");
   appendNavLink(page, NavTab::Wifi, active, "/wifi", "WiFi");
   appendNavLink(page, NavTab::Auth, active, "/auth", "鉴权");
   appendNavLink(page, NavTab::Todo, active, "/todo", "待办");
@@ -225,6 +285,7 @@ static void kvRow(String &b, const char *k, const String &v) {
 static void handleRoot() {
   const AppConfig &cfg = getAppConfig();
   String b;
+  appendFlashFromQuery(b);
   b += F("<section><div class=status-hero><div>");
   if (wifiIsStaConnected()) {
     b += F("<span class='pill on'>STA 已连接</span>");
@@ -281,7 +342,100 @@ static void handleRoot() {
     }
     kvRow(b, "自动关机", String(idle));
   }
+  kvRow(b, "一周起始", String(cfg.week_start_monday ? "周一" : "周日"));
+  {
+    char tz[24];
+    const int off = cfg.tz_offset_min;
+    const int omin = (off < 0 ? -off : off) % 60;
+    snprintf(tz, sizeof(tz), "UTC%+d:%02d", off / 60, omin);
+    kvRow(b, "时区", String(tz));
+    char ntp[48];
+    const int ago = rtcDaysSinceNtp();
+    if (ago < 0) {
+      snprintf(ntp, sizeof(ntp), "从未 · 周期 %u 天", (unsigned)cfg.ntp_interval_days);
+    } else {
+      snprintf(ntp, sizeof(ntp), "%d 天前 · 周期 %u 天", ago, (unsigned)cfg.ntp_interval_days);
+    }
+    kvRow(b, "NTP", String(ntp));
+    RtcDateTime now;
+    if (rtcRead(now)) {
+      char tbuf[40];
+      snprintf(tbuf, sizeof(tbuf), "%04d-%02d-%02d %02d:%02d:%02d", now.year, now.month, now.day,
+               now.hour, now.minute, now.second);
+      kvRow(b, "当前时间", String(tbuf));
+    } else {
+      kvRow(b, "当前时间", String("<span class='pill warn'>未设置</span>"));
+    }
+  }
+  {
+    String apps;
+    const int n = static_cast<int>(AppId::Count);
+    for (int i = 0; i < n; i++) {
+      const AppId id = static_cast<AppId>(i);
+      if (!appIdEnabled(id)) continue;
+      if (apps.length()) apps += " · ";
+      apps += appIdLabelZh(id);
+    }
+    if (!apps.length()) apps = "—";
+    kvRow(b, "应用", apps);
+  }
   b += F("</dl></section>");
+  sendHtml("状态", NavTab::Status, b);
+}
+
+static const char *appCardSvg(AppId id) {
+  switch (id) {
+    case AppId::Todo:
+      return "<svg viewBox='0 0 24 24' fill='none' stroke='#1a1a1a' stroke-width='2'>"
+             "<rect x='4' y='4' width='16' height='16' rx='2'/>"
+             "<path d='M8 12l2.5 2.5L16 9'/></svg>";
+    case AppId::Calendar:
+      return "<svg viewBox='0 0 24 24' fill='none' stroke='#1a1a1a' stroke-width='2'>"
+             "<rect x='3' y='5' width='18' height='16' rx='2'/>"
+             "<path d='M3 10h18M8 3v4M16 3v4'/></svg>";
+    case AppId::Weather:
+      return "<svg viewBox='0 0 24 24' fill='none' stroke='#1a1a1a' stroke-width='2'>"
+             "<circle cx='10' cy='10' r='3'/>"
+             "<path d='M10 3v2M10 15v2M3 10h2M15 10h2M5.2 5.2l1.4 1.4M13.4 13.4l1.4 1.4M5.2 14.8l1.4-1.4M13.4 6.6l1.4-1.4'/>"
+             "<path d='M14 16.5a3.5 3.5 0 1 0 .3-7'/></svg>";
+    case AppId::Album:
+      return "<svg viewBox='0 0 24 24' fill='none' stroke='#1a1a1a' stroke-width='2'>"
+             "<rect x='3' y='5' width='18' height='14' rx='2'/>"
+             "<circle cx='9' cy='11' r='2'/>"
+             "<path d='M3 16l5-4 4 3 3-2 6 4'/></svg>";
+    default:
+      return "";
+  }
+}
+
+static void handleSettingsGet() {
+  const AppConfig &cfg = getAppConfig();
+  String b;
+  appendFlashFromQuery(b);
+
+  b += F("<section><h2>应用</h2>"
+         "<p class=hint>点击卡片切换是否在设备上启用。上下键只在已启用应用间切换；至少保留一个。</p>"
+         "<div class=app-grid>");
+  const int n = static_cast<int>(AppId::Count);
+  for (int i = 0; i < n; i++) {
+    const AppId id = static_cast<AppId>(i);
+    const bool on = appIdEnabled(id);
+    b += F("<form method=POST action=/apps style=margin:0>"
+           "<input type=hidden name=id value=");
+    b += String(i);
+    b += F("><button type=submit class='app-card ");
+    b += on ? F("on") : F("off");
+    b += F("'><span class=ico>");
+    b += appCardSvg(id);
+    b += F("</span><p class=name>");
+    b += appIdLabelZh(id);
+    b += F("</p><p class=desc>");
+    b += appIdHintZh(id);
+    b += F("</p><span class=st>");
+    b += on ? F("已启用 · 点击关闭") : F("已关闭 · 点击启用");
+    b += F("</span></button></form>");
+  }
+  b += F("</div></section>");
 
   b += F("<section><h2>电源</h2>"
          "<p class=hint>无操作自动关机是本固件自己的计时，不是芯片默认。按下任意键会重新计时。"
@@ -310,21 +464,141 @@ static void handleRoot() {
     b += String(cfg.idle_off_sec);
     b += F(" 秒</option>");
   }
-  b += F("</select><div class=btn-row><button type=submit>保存电源设置</button></div></form></section>");
-  sendHtml("状态", NavTab::Status, b);
+  b += F("</select>");
+  b += F("<label>日历一周起始</label><select name=week_start>");
+  b += F("<option value=mon");
+  if (cfg.week_start_monday) b += F(" selected");
+  b += F(">周一</option><option value=sun");
+  if (!cfg.week_start_monday) b += F(" selected");
+  b += F(">周日</option></select>");
+  b += F("<div class=btn-row><button type=submit>保存电源 / 日历设置</button></div></form></section>");
+
+  b += F("<section><h2>时间 / 时区</h2>"
+         "<p class=hint>板载 PCF8563 可在掉电后继续走时。复位后下次联网会校一次；平时按周期 NTP。"
+         "离线可在下方手动设置本地时间。</p>");
+  b += F("<form method=POST action=/time>");
+  b += F("<label>时区（UTC 偏移）</label><select name=tz_offset_min>");
+  static const int tz_opts[] = {-720, -600, -480, -300, 0, 60, 120, 180, 330, 480, 540, 600, 720};
+  static const char *tz_labs[] = {"UTC-12", "UTC-10", "UTC-8", "UTC-5", "UTC+0", "UTC+1", "UTC+2",
+                                  "UTC+3", "UTC+5:30", "UTC+8 中国", "UTC+9", "UTC+10", "UTC+12"};
+  bool tz_hit = false;
+  for (int i = 0; i < 13; i++) {
+    b += F("<option value=");
+    b += String(tz_opts[i]);
+    if (cfg.tz_offset_min == tz_opts[i]) {
+      b += F(" selected");
+      tz_hit = true;
+    }
+    b += F(">");
+    b += tz_labs[i];
+    b += F("</option>");
+  }
+  if (!tz_hit) {
+    b += F("<option value=");
+    b += String(cfg.tz_offset_min);
+    b += F(" selected>自定义 ");
+    b += String(cfg.tz_offset_min);
+    b += F(" 分</option>");
+  }
+  b += F("</select>");
+  b += F("<label>NTP 周期</label><select name=ntp_interval_days>");
+  const uint16_t ntp_opts[] = {30, 14, 7};
+  const char *ntp_labs[] = {"30 天", "14 天", "7 天"};
+  for (int i = 0; i < 3; i++) {
+    b += F("<option value=");
+    b += String(ntp_opts[i]);
+    if (cfg.ntp_interval_days == ntp_opts[i]) b += F(" selected");
+    b += F(">");
+    b += ntp_labs[i];
+    b += F("</option>");
+  }
+  b += F("</select>");
+  b += F("<div class=btn-row>"
+         "<button type=submit name=action value=save_cfg>保存时区 / 周期</button>"
+         "<button type=submit name=action value=ntp_now class=secondary>立即 NTP 校时</button>"
+         "</div>");
+  b += F("<label>手动设置本地时间</label>");
+  b += F("<input type=datetime-local name=manual_time step=1");
+  RtcDateTime now;
+  if (rtcRead(now)) {
+    char v[32];
+    snprintf(v, sizeof(v), " value=%04d-%02d-%02dT%02d:%02d:%02d", now.year, now.month, now.day,
+             now.hour, now.minute, now.second);
+    b += v;
+  }
+  b += F(">");
+  b += F("<div class=btn-row><button type=submit name=action value=set_manual>写入 RTC</button></div>");
+  b += F("</form></section>");
+  sendHtml("设置", NavTab::Settings, b);
+}
+
+static void handleAppsPost() {
+  const uint8_t id = (uint8_t)g_server.arg("id").toInt();
+  const bool currently = (getAppConfig().apps_enabled & (1u << id)) != 0;
+  if (!setAppEnabled(id, !currently)) {
+    redirectOk("/settings", "apps_last");
+    return;
+  }
+  redirectOk("/settings", "apps");
 }
 
 static void handlePowerPost() {
   const uint32_t sec = (uint32_t)g_server.arg("idle_off_sec").toInt();
   saveIdleOffSec(sec);
   powerIdleSetTimeoutSec(sec);
-  g_server.sendHeader("Location", "/");
-  g_server.send(303);
+  const String ws = g_server.arg("week_start");
+  saveWeekStartMonday(ws != "sun");
+  redirectOk("/settings", "power");
+}
+
+static void handleTimePost() {
+  const String action = g_server.arg("action");
+  if (action == "save_cfg" || action == "ntp_now") {
+    saveTimezoneOffsetMin((int16_t)g_server.arg("tz_offset_min").toInt());
+    saveNtpIntervalDays((uint16_t)g_server.arg("ntp_interval_days").toInt());
+    rtcApplyTimezone();
+  }
+  if (action == "ntp_now") {
+    bool ok = false;
+    if (wifiIsStaConnected()) {
+      ok = rtcSyncFromNtp(10000);
+    } else if (hasSavedWifiConfig()) {
+      if (wifiConnectSaved(15000)) ok = rtcSyncFromNtp(10000);
+    }
+    redirectOk("/settings", ok ? "ntp" : "ntp_fail");
+    return;
+  } else if (action == "set_manual") {
+    // "2026-11-20T10:30" or with seconds
+    const String s = g_server.arg("manual_time");
+    if (s.length() >= 16) {
+      RtcDateTime dt;
+      dt.ok = true;
+      dt.year = s.substring(0, 4).toInt();
+      dt.month = s.substring(5, 7).toInt();
+      dt.day = s.substring(8, 10).toInt();
+      dt.hour = s.substring(11, 13).toInt();
+      dt.minute = s.substring(14, 16).toInt();
+      dt.second = (s.length() >= 19) ? s.substring(17, 19).toInt() : 0;
+      dt.weekday = -1;
+      rtcWrite(dt);
+      Serial.printf("[RTC] manual set %04d-%02d-%02d %02d:%02d:%02d\n", dt.year, dt.month, dt.day,
+                    dt.hour, dt.minute, dt.second);
+    }
+    // still allow saving tz if submitted together
+    if (g_server.hasArg("tz_offset_min")) {
+      saveTimezoneOffsetMin((int16_t)g_server.arg("tz_offset_min").toInt());
+      rtcApplyTimezone();
+    }
+    redirectOk("/settings", "rtc");
+    return;
+  }
+  redirectOk("/settings", "tz");
 }
 
 static void handleWifiGet() {
   const AppConfig &cfg = getAppConfig();
   String b;
+  appendFlashFromQuery(b);
   b += F("<section><h2>WiFi（最多 5 条）</h2>");
   b += F("<p class=hint>大字为 SSID，下方小字为密码。保存后按 Active → 其它条目自动尝试连接。</p>");
   b += F("<form method=POST action=/wifi>");
@@ -401,8 +675,7 @@ static void handleWifiPost() {
   appConfigFromJson(json.c_str());
   saveAppConfig();
   (void)mutable_view;
-  g_server.sendHeader("Location", "/wifi");
-  g_server.send(303);
+  redirectOk("/wifi", "wifi");
 }
 
 static void appendAuthForm(String &b, const AppConfig &cfg) {
@@ -495,6 +768,7 @@ static void handleTodoPost() {
     for (int i = 0; i < n; i++) {
       if (!items[i].done) open_n++;
     }
+    b += F("<div class='flash ok'>待办已拉取</div>");
     b += F("<section><h2>");
     b += d.title.length() ? d.title : String("Todo");
     b += F("</h2><p class=meta>#");
@@ -550,9 +824,11 @@ static void appendWeatherForm(String &b, const AppConfig &cfg, const WeatherGeoR
   b += F("<p class=hint>设备经 <strong>Portal</strong> 拉天气（<code>/weather/*</code>），"
          "和风 JWT/Key 在服务器配置。请先在「鉴权」登录，再用下方搜索选位置。</p>");
   b += F("<form method=POST action=/weather>");
-  b += F("<label><input type=checkbox name=enabled value=1");
+  b += F("<label class='check-row");
+  if (cfg.qweather_enabled) b += F(" on");
+  b += F("'><input type=checkbox name=enabled value=1");
   if (cfg.qweather_enabled) b += F(" checked");
-  b += F("> 启用天气</label>");
+  b += F("><span>启用天气</span></label>");
   b += F("<label>当前 LocationID</label><input name=location_id value=\"");
   b += htmlEscapeAttr(cfg.qweather_location_id);
   b += F("\" readonly>");
@@ -636,7 +912,16 @@ static void handleWeatherPost() {
   } else if (action == "search") {
     const String q = g_server.arg("geo_query");
     if (!weatherGeoLookup(q.c_str(), geo)) {
-      // geo.message already set
+      flash = F("<div class='flash err'>搜索失败");
+      if (geo.message.length()) {
+        flash += F("：");
+        flash += geo.message;
+      }
+      flash += F("</div>");
+    } else {
+      flash = F("<div class='flash ok'>搜索完成，找到 ");
+      flash += String(geo.count);
+      flash += F(" 个位置</div>");
     }
   } else if (action == "pick") {
     const String id = g_server.arg("pick");
@@ -679,7 +964,10 @@ static void handleFavicon() {
 
 static void registerRoutes() {
   g_server.on("/", HTTP_GET, handleRoot);
+  g_server.on("/settings", HTTP_GET, handleSettingsGet);
+  g_server.on("/apps", HTTP_POST, handleAppsPost);
   g_server.on("/power", HTTP_POST, handlePowerPost);
+  g_server.on("/time", HTTP_POST, handleTimePost);
   g_server.on("/favicon.svg", HTTP_GET, handleFavicon);
   g_server.on("/wifi", HTTP_GET, handleWifiGet);
   g_server.on("/wifi", HTTP_POST, handleWifiPost);

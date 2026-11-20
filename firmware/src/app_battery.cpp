@@ -30,7 +30,7 @@ static uint16_t readPackMv() {
 }
 
 static uint8_t percentFromMv(uint16_t mv) {
-  // Official NOTE4C curve (same integers as reference firmware).
+  // Official NOTE4C battery curve (same integers as reference firmware).
   int p = (-1 * (int)mv * (int)mv + 9016 * (int)mv - 19189000) / 10000;
   if (p > 100) p = 100;
   if (p < 0) p = 0;

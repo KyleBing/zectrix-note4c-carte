@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- 固件正式命名 **Carte**（Web 标题 / env `carte` / AP `Note4C-Carte` / Release `note4c-carte-*`）；NVS 从 `note4c` 自动迁移
+- Web：状态与设置拆分；设置页卡片开关各 App
+- 关机改为深睡，按下键（GPIO18）即可唤醒开机；避免 USB 供电时卡在死循环、只能按 RESET
+- 上电不自动刷屏，LED 快闪 3 下表示开机；按键后再刷新页面
+- 顶栏 App 色点：未选 3×7 / 选中 3×11，间隔 2px；footer 等腰三角 + 方底居中
+- 天气 header 用中文字库（修 ???）；BOOT 切模式只要刷屏成功即反馈，标题带当前 mode
+- 上下键切 App 改为与相册 BOOT 相同的连击超时（180ms 静默后一次跳过 N 个）
+- 日历年月在 header；日期格内大字公历 + 小字农历
+- 日历：大字公历 + 小字农历；周字与横线 +3px；Web 可配周起始 / 时区 / NTP 周期 / 手动设时
+- NTP：复位后校一次，平时按周期（默认 30 天，可选 14/7）；RTC 无效时也会校
+- 新增日历 App
+
 ## v0.0.15
 
 - 相册上限 30 张；每张可勾选「展示」（默认开），取消后文件保留、设备翻页跳过
@@ -82,7 +96,7 @@
 ## v0.2.0
 
 - 待办看板：按配置的 diary id 拉取 portal-go 日记并全刷墨水屏
-- Web 配网（STA / AP `note4c`），多 WiFi 档案自动连接
+- Web 配网（STA / AP），多 WiFi 档案自动连接
 - Portal 登录鉴权，JWT 落盘；`X-Access-Token` 自动续签
 - LittleFS 中文字库（HZK16 + ASC16 + uni2gb）
 

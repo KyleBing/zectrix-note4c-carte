@@ -7,8 +7,8 @@
 
 | 文件 | 用途 |
 |------|------|
-| `note4c-${TAG}-merged.bin` | 整片烧录（bootloader + 分区表 + 程序），地址 `0x0` |
-| `note4c-${TAG}-firmware.bin` | 仅 app（一般配合 PlatformIO Upload / 对应偏移） |
+| `note4c-carte-${TAG}-merged.bin` | 整片烧录（bootloader + 分区表 + 程序），地址 `0x0` |
+| `note4c-carte-${TAG}-firmware.bin` | 仅 app（一般配合 PlatformIO Upload / 对应偏移） |
 
 ### 刷写工具
 
@@ -18,7 +18,7 @@ pip install -U esptool
 
 ### 连接设备
 
-USB 连接 NOTE4C，确认串口后替换下方命令中的 `PORT`：
+USB 连接 NOTE4C（Carte 目标板），确认串口后替换下方命令中的 `PORT`：
 
 - Windows：`COM3` 等
 - macOS：`/dev/cu.usbmodem*`
@@ -31,14 +31,14 @@ USB 连接 NOTE4C，确认串口后替换下方命令中的 `PORT`：
 ```bash
 esptool.py --chip esp32s3 --port PORT --baud 921600 write_flash \
   --flash_mode qio --flash_freq 80m --flash_size 16MB \
-  0x0 note4c-${TAG}-merged.bin
+  0x0 note4c-carte-${TAG}-merged.bin
 ```
 
 ### PlatformIO 本地编译 / 上传
 
 ```bash
 cd firmware
-pio run -e note4c -t upload
+pio run -e carte -t upload
 pio device monitor
 ```
 
@@ -48,5 +48,5 @@ pio device monitor
 
 - 开机全刷状态页约 **10s+**，属正常
 - **短按松开 BOOT**：再刷一页最新状态
-- **长按 DOWN ~3s**：释放电源保持（电池模式可能关机）
+- **长按 DOWN ~3s**：关机（深睡）；再按下键唤醒开机
 - 文档：https://kylebing.github.io/zectrix-note4c-display/

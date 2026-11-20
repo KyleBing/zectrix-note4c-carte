@@ -691,15 +691,20 @@ async function refreshList(){
       const on=n===editName?' on':'';
       const dim=show?'':' off';
       return '<div class="thumb'+on+dim+'"><canvas width=400 height=300 data-name="'+n+'"></canvas>'
-        +'<div class=row>'
+        +'<div class="row meta-row">'
         +'<label class=show-lab><input type=checkbox data-show="'+n+'"'+(show?' checked':'')+'>展示</label>'
-        +'<code>'+n+'</code>'
-        +'<button type=button class=secondary data-dl="'+n+'" style="margin-left:auto;padding:4px 8px;font-size:11px">下载</button>'
-        +'<button type=button class=secondary data-edit="'+n+'" style="padding:4px 8px;font-size:11px">编辑</button>'
-        +'<button type=button class=danger data-del="'+n+'" style="padding:4px 8px;font-size:11px">删</button></div></div>';
+        +'<code>'+n+'</code></div>'
+        +'<div class="row acts">'
+        +'<button type=button class=secondary data-dl="'+n+'">下载</button>'
+        +'<button type=button class=secondary data-edit="'+n+'">编辑</button>'
+        +'<button type=button class=danger data-del="'+n+'">删</button></div></div>';
     }).join('');
     el.querySelectorAll('[data-dl]').forEach(function(btn){
-      btn.onclick=function(ev){ev.stopPropagation();downloadSaved(btn.dataset.dl).catch(function(e){$('convInfo').textContent=e;});};
+      btn.onclick=function(ev){
+        ev.stopPropagation();
+        downloadSaved(btn.dataset.dl).then(function(){toast('已开始下载');})
+          .catch(function(e){$('convInfo').textContent=e;toast(String(e),true);});
+      };
     });
     el.querySelectorAll('[data-del]').forEach(function(btn){
       btn.onclick=async function(ev){
@@ -707,6 +712,7 @@ async function refreshList(){
         if(!confirm('删除 '+btn.dataset.del+' ?')) return;
         await fetch('/album/delete?name='+encodeURIComponent(btn.dataset.del),{method:'POST'});
         if(editName===btn.dataset.del) editName='';
+        toast('已删除 '+btn.dataset.del);
         refreshList();
       };
     });
@@ -717,6 +723,7 @@ async function refreshList(){
         const show=cb.checked?1:0;
         await fetch('/album/show?name='+encodeURIComponent(name)+'&show='+show,{method:'POST'});
         cb.closest('.thumb').classList.toggle('off',!cb.checked);
+        toast(show?'已设为展示':'已取消展示');
       };
       cb.onclick=function(ev){ev.stopPropagation();};
     });
@@ -744,6 +751,7 @@ document.body.appendChild(panHold);document.body.appendChild(panHoldY);
 $('showHeader').onchange=async function(){
   const show=this.checked?1:0;
   await fetch('/album/header?show='+show,{method:'POST'});
+  toast(show?'已显示相册标题栏':'已隐藏相册标题栏');
 };
 paint.fill(-1);
 setTool('pan');setBrushCol(0);setEm();renderRules();drawHist();refreshList();

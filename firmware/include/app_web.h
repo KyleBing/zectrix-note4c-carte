@@ -2,7 +2,7 @@
 
 #include <Arduino.h>
 
-// Start config portal: prefer STA if WiFi saved, else AP (note4c/note4c).
+// Start config portal: prefer STA if WiFi saved, else AP (Note4C-Carte).
 // force_ap=true always opens hotspot.
 bool webStart(bool force_ap = false);
 void webLoop();

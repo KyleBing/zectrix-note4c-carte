@@ -5,12 +5,12 @@
 // Try wifi_active first, then other saved profiles. Returns true if STA connected.
 bool wifiConnectSaved(uint32_t timeout_ms = 15000);
 
-// WPA2 SoftAP password must be >= 8 chars (ESP32). Defaults: note4c / note4c4c
-bool wifiStartAp(const char *ssid = "note4c", const char *pass = "note4c4c");
+// WPA2 SoftAP password must be >= 8 chars (ESP32).
+bool wifiStartAp(const char *ssid = "Note4C-Carte", const char *pass = "Note4C-Carte");
 void wifiStopAp();
 
-static constexpr const char *WIFI_AP_SSID = "note4c";
-static constexpr const char *WIFI_AP_PASS = "note4c4c";
+static constexpr const char *WIFI_AP_SSID = "Note4C-Carte";
+static constexpr const char *WIFI_AP_PASS = "Note4C-Carte";
 
 bool wifiIsStaConnected();
 String wifiStaIp();

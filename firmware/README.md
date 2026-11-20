@@ -1,12 +1,12 @@
-# NOTE4C 固件（待办看板）
+# Carte 固件
 
-PlatformIO + Arduino。**四色墨水屏待办页** + **WiFi / Web 配网鉴权**（portal-go diary）。
+PlatformIO + Arduino。面向 **ZECTRIX NOTE4C** 四色墨水屏：多 App（待办 / 日历 / 天气 / 相册）+ **WiFi / Web 配网鉴权**（portal-go）。
 
 完整说明：[固件功能](../docs/features/index.md)
 
 ## 编译 / 刷写
 
-芯片：**ESP32-S3 N16R8**（16 MB Flash / 8 MB PSRAM）· env：`note4c`
+芯片：**ESP32-S3 N16R8**（16 MB Flash / 8 MB PSRAM）· env：`carte`
 
 | 操作 | 说明 |
 | --- | --- |
@@ -61,22 +61,24 @@ pio device monitor   # 115200
 
 ```bash
 esptool.py --chip esp32s3 write_flash \
-  0x0      .pio/build/note4c/bootloader.bin \
-  0x8000   .pio/build/note4c/partitions.bin \
-  0x10000  .pio/build/note4c/firmware.bin
+  0x0      .pio/build/carte/bootloader.bin \
+  0x8000   .pio/build/carte/partitions.bin \
+  0x10000  .pio/build/carte/firmware.bin
 # 字库 / 相册文件系统另用：pio run -t uploadfs  → 写到 0xC90000
 ```
 
 ## 按键
 
-- **BOOT** 松开：拉日记并全刷
-- **UP** 短按：开配置 Web（有 WiFi→STA，否则 AP）
-- **UP** 长按 ~1.5s：强制 AP（`note4c` / `note4c4c`，密码须 ≥8 位）
-- **DOWN** 长按 ~3s：释放电源保持
+- **BOOT** 松开：App 内功能（天气切模式 / 相册翻页等）
+- **UP** 短按：上一个 App
+- **UP** 长按 ~1.5s：开配置 Web（有 WiFi→STA，否则 AP）
+- **UP** 再长按（已在 Web）：强制 AP（`Note4C-Carte` / `Note4C-Carte`）
+- **DOWN** 短按：下一个 App
+- **DOWN** 长按 ~3s：关机（深睡）；再按下键唤醒开机
 - **LED**：按键按下即亮、松开即灭；刷屏呼吸；慢闪连 WiFi；失败三短闪
 
 ## Web
 
-`/` 状态 · `/wifi` 多 WiFi · `/auth` 登录与 diary id · `/todo` 预览 · `/weather` · `/album`
+`/` 状态 · `/settings` 设置（应用开关 / 电源 / 时间）· `/wifi` · `/auth` · `/todo` · `/weather` · `/album`
 
 JWT：登录保存；业务响应若带 `X-Access-Token` 则自动更新（portal-go 剩余 &lt; 7 天续签）。

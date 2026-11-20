@@ -1,5 +1,5 @@
 /**
- * Minimal SSD2683 4-color (BWRY) driver for NOTE4C.
+ * Minimal SSD2683 4-color (BWRY) driver for Carte (NOTE4C).
  *
  * Init / refresh sequence adapted from LazyYoun youn-ink-fourcolor-firmware
  * (MIT): custom_lcd_display.cc four-color path (cmd 0xE9 / 0x10 / 0x12 ...).
@@ -103,7 +103,7 @@ void EpdSsd2683::hwReset() {
 }
 
 void EpdSsd2683::initPanel() {
-  // Four-color NOTE4C path from reference firmware.
+  // Four-color BWRY path from NOTE4C reference firmware.
   sendCommand(0xE9);
   sendData(0x01);
 }
@@ -161,6 +161,75 @@ void EpdSsd2683::drawRect(int x, int y, int w, int h, EpdColor color) {
   drawHLine(x, y + h - 1, w, color);
   drawVLine(x, y, h, color);
   drawVLine(x + w - 1, y, h, color);
+}
+
+void EpdSsd2683::fillTriangle(int x0, int y0, int x1, int y1, int x2, int y2, EpdColor color) {
+  // Sort by y: y0 <= y1 <= y2
+  auto swap = [](int &a, int &b) {
+    const int t = a;
+    a = b;
+    b = t;
+  };
+  if (y0 > y1) {
+    swap(y0, y1);
+    swap(x0, x1);
+  }
+  if (y1 > y2) {
+    swap(y1, y2);
+    swap(x1, x2);
+  }
+  if (y0 > y1) {
+    swap(y0, y1);
+    swap(x0, x1);
+  }
+  auto edge = [](int xa, int ya, int xb, int yb, int y) -> int {
+    if (ya == yb) return xa;
+    return xa + (xb - xa) * (y - ya) / (yb - ya);
+  };
+  for (int y = y0; y <= y2; y++) {
+    int xa, xb;
+    if (y < y1) {
+      xa = edge(x0, y0, x2, y2, y);
+      xb = (y1 == y0) ? x1 : edge(x0, y0, x1, y1, y);
+    } else {
+      xa = edge(x0, y0, x2, y2, y);
+      xb = (y2 == y1) ? x1 : edge(x1, y1, x2, y2, y);
+    }
+    if (xa > xb) swap(xa, xb);
+    for (int x = xa; x <= xb; x++) setPixel(x, y, color);
+  }
+}
+
+void EpdSsd2683::drawCircle(int cx, int cy, int r, EpdColor color) {
+  if (r < 0) return;
+  int x = r, y = 0, err = 1 - r;
+  while (x >= y) {
+    setPixel(cx + x, cy + y, color);
+    setPixel(cx + y, cy + x, color);
+    setPixel(cx - y, cy + x, color);
+    setPixel(cx - x, cy + y, color);
+    setPixel(cx - x, cy - y, color);
+    setPixel(cx - y, cy - x, color);
+    setPixel(cx + y, cy - x, color);
+    setPixel(cx + x, cy - y, color);
+    y++;
+    if (err < 0) {
+      err += 2 * y + 1;
+    } else {
+      x--;
+      err += 2 * (y - x) + 1;
+    }
+  }
+}
+
+void EpdSsd2683::fillCircle(int cx, int cy, int r, EpdColor color) {
+  if (r < 0) return;
+  for (int dy = -r; dy <= r; dy++) {
+    int dx = 0;
+    while (dx * dx + dy * dy <= r * r) dx++;
+    dx--;
+    if (dx >= 0) drawHLine(cx - dx, cy + dy, 2 * dx + 1, color);
+  }
 }
 
 int EpdSsd2683::drawChar(int x, int y, char c, EpdColor fg, EpdColor bg) {

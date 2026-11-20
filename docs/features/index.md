@@ -2,7 +2,7 @@
 
 > 当前固件：**多 App**（待办 / 日记 / 天气 / 相册占位）+ **WiFi / Web 配网鉴权** + 和风天气 + 四色墨水屏  
 > 主调：白底黑字，黄强调，红警示  
-> 版本：`{{DOC_VERSION}}` · 工程目录：`firmware/` · PlatformIO env：`note4c`
+> 固件名：**Carte** · 版本：`{{DOC_VERSION}}` · 工程目录：`firmware/` · PlatformIO env：`carte`
 
 ---
 
@@ -12,10 +12,12 @@
 
 | 能力 | 说明 |
 | --- | --- |
-| 多 App | 上下短按切换：TODO → WEATHER → ALBUM；顶栏显示槽位 `n/3` |
+| 多 App | 上下短按切换：TODO → CALENDAR → WEATHER → ALBUM；顶栏单行色点（白 3×7 / 选中 3×11，间隔 2px） |
+| 日历 | header 显示年月；格内大字公历 + 小字农历；今天红底白字；Web 可配周起始 / 时区 / 手动时间 |
+| 时钟 | PCF8563；复位后联网校一次，平时按周期 NTP（默认 30 天）；可离线手设 |
 | 相册 | Web `/album` 页内编辑（裁切/色阶/取色映射）后抖动上传 `.2bp`；BOOT 翻页；最多 30 张；可取消「展示」但仍保留文件 |
 | 多 WiFi | 最多 5 组 SSID；按 Active → 其余顺序自动连接 |
-| 配网 Web | STA 同网或 AP 热点 `note4c` / `note4c4c`（`http://192.168.4.1`；密码须 ≥8 位） |
+| 配网 Web | STA 同网或 AP 热点 `Note4C-Carte` / `Note4C-Carte`（`http://192.168.4.1`） |
 | Portal 登录 | `POST /portal/user/login`，JWT 落盘 |
 | Token 续签 | 响应头 `X-Access-Token`（剩余 &lt; 7 天）自动写回 |
 | 待办页 | `GET /portal/diary/detail?diaryId=`；`-` 未完成 / `=` 已完成（未完成在前） |
@@ -28,11 +30,12 @@
 
 | 操作 | 行为 |
 | --- | --- |
-| 短按松开 **DOWN** | **下一个 App**（1→2→3，往下翻） |
-| 短按松开 **UP** | **上一个 App**（3→2→1，往上翻） |
+| 短按松开 **DOWN** | **下一个 App**；连按后停约 180ms 再跳过 N 个（同相册 BOOT） |
+| 短按松开 **UP** | **上一个 App**；连按同样超时合并 |
 | 长按 **UP ~1.5s** | 启动配置 Web（已在 Web 再长按 → 强制 AP） |
-| 长按 **DOWN ~3s** | **关机**：释放 `PWR_HOLD` |
-| 短按松开 **BOOT** | **仅 App 内功能键**：天气切 NOW→12H→7D→14D；待办刷新；相册下一张；Web 中退出回 App |
+| 长按 **DOWN ~3s** | **关机**：释放 `PWR_HOLD` 并深睡；再按下键唤醒开机 |
+| 关机后按 **DOWN** | **开机 / 唤醒**（含 USB 仍供电时的假关机） |
+| 短按松开 **BOOT** | **仅 App 内功能键**：天气切 NOW→12H→7D→14D；待办/日历刷新；相册下一张；Web 中退出回 App |
 
 ### LED（空闲关闭）
 

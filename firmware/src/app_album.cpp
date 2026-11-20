@@ -2,6 +2,7 @@
 #include "app_config.h"
 #include "app_header.h"
 #include "app_theme.h"
+#include "app_footer.h"
 #include "app_version.h"
 #include "app_font.h"
 
@@ -235,11 +236,7 @@ bool albumShow(EpdSsd2683 &epd, int index) {
                         "No photos yet.\nOpen Web config -> Album\n"
                         "Edit + dither on phone,\nupload .2bp to device.",
                         Theme::Fg);
-    epd.drawHLine(Theme::MarginX, Theme::FooterY, 384, Theme::Fg);
-    epd.drawText(Theme::MarginX, 282, "BOOT:next  DN:nextApp  UP:prev  hold:web/off", Theme::Fg);
-    char ver[24];
-    snprintf(ver, sizeof(ver), "%s(%d)", APP_VERSION, APP_BUILD);
-    epd.drawText(400 - Theme::MarginX - (int)strlen(ver) * 6, 282, ver, Theme::Fg);
+    footerDraw(epd, "next", "nextApp");
     epd.display();
     return true;
   }
