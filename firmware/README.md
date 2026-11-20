@@ -69,10 +69,10 @@ esptool.py --chip esp32s3 write_flash \
 
 ## 按键
 
-- **BOOT** 松开：App 内功能（天气切 NOW→12H→7D→14D / 相册翻页等）；连按后静默 500ms 再一次跳过 N 次；天气页有黄标显示当前时段
+- **BOOT** 松开：App 内功能（天气切 NOW→7D / 相册翻页等）；连按后静默 500ms 再一次跳过 N 次；天气 header 有黄标显示当前时段
 - **UP** 短按：上一个 App（连按同样 500ms 合并）
-- **UP** 长按 ~1.5s：开配置 Web（有 WiFi→STA，否则 AP）
-- **UP** 再长按（已在 Web）：强制 AP（`Note4C-Carte` / `Note4C-Carte`）
+- **UP** 长按 ~1.5s：开配置 Web（有 WiFi→同 WiFi 站点，否则 AP 模式）
+- **UP** 再长按（已在 Web）：AP 模式 ↔ 同 WiFi 站点（热点密码 `12345678`）
 - **DOWN** 短按：下一个 App（连按同样 500ms 合并）
 - **DOWN** 长按 ~3s：关机（深睡）；再按下键唤醒开机
 - **LED**：按键按下即亮、松开即灭；刷屏呼吸；慢闪连 WiFi；失败三短闪

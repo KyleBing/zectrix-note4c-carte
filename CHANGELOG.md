@@ -2,7 +2,18 @@
 
 ## Unreleased
 
-- Web 相册：原图 / 四色预览不再用滚轮缩放（页内滚动、滑条缩放仍可用）
+- 天气柱顶气温改大字；小时时间显示「18时」；7D 柱改回纯红
+- 天气 7D：日期 `11/24`；柱上气温与小时图同字号；周几下不再写区间
+- 小时柱顶只标数字，距柱 3px
+- 天气：小时图改为红色单色柱；当天文案行距 3px；7D 日期带周几；NOW/7D 标进 header
+- AP 密码改为 `12345678`；配置页 AP 下再长按上键切到同 WiFi 站点
+- 配置页模式图标 / 名称 / 地址黑底展示（下边距 8px，黄/白字）
+- 天气：NOW 左上大图标 + 气温湿度空气质量，下方 6 小时柱；BOOT 只切 NOW / 7D（去掉 14D）
+- 天气图标按 90px 重新量化，柱顶图标加大
+- 配置页墨水屏按模式显示 `design/icon` 的 AP / 同 WiFi 站点图标；网页文案不再写 STA
+- Web 配置页 favicon 同步最新 `design/favicon.svg`
+- 墨水屏配置页：可用页面改成黄底 tab；说明文字行距 3px
+- Web 相册：原图 / 四色预览滚轮不再缩放或内滚，直接翻网页；缩放只用滑条
 - Web 顶栏右侧增加 GitHub 仓库链接
 - 仓库更名为 [zectrix-note4c-carte](https://github.com/KyleBing/zectrix-note4c-carte)
 - 看门狗：长操作结束不再误开 loop/idle1 TWDT（Arduino 默认只盯 CPU0 idle）；超时 5s→30s；404 不再解析 HTML。修 12H 记完错误仍复位

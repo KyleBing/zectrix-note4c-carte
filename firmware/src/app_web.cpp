@@ -121,8 +121,8 @@ body.page-album main{max-width:none;width:100%;margin:0;padding:0;display:block}
 .ed-can,.ed-cur{position:absolute;inset:0;width:100%;height:100%;image-rendering:pixelated;border:1px solid #ccc;background:#fff;touch-action:none;display:block}
 .ed-can{cursor:grab}
 .ed-cur{pointer-events:none;border:0;background:transparent}
-#pvStage .ed-fit{overflow:auto}
-.ed-zoom{position:absolute;inset:0;width:100%;height:100%}
+#pvStage .ed-fit{overflow:hidden}
+.ed-zoom{position:absolute;inset:0;width:100%;height:100%;overflow:hidden}
 .ed-toast{position:fixed;top:56px;left:50%;transform:translate(-50%,-12px);background:#0a7a4b;color:#fff;padding:12px 24px;font-size:16px;font-weight:700;z-index:80;opacity:0;pointer-events:none;box-shadow:0 8px 28px rgba(0,0,0,.22);transition:opacity .18s,transform .18s;letter-spacing:.02em}
 .ed-toast.show{opacity:1;transform:translate(-50%,0)}
 .ed-toast.err{background:#b42318}
@@ -331,9 +331,9 @@ static void handleRoot() {
   appendFlashFromQuery(b);
   b += F("<section><div class=status-hero><div>");
   if (wifiIsStaConnected()) {
-    b += F("<span class='pill on'>STA 已连接</span>");
+    b += F("<span class='pill on'>同 WiFi 站点已连接</span>");
   } else if (g_ap) {
-    b += F("<span class='pill ap'>热点配网</span>");
+    b += F("<span class='pill ap'>AP 模式</span>");
   } else {
     b += F("<span class='pill off'>未联网</span>");
   }
@@ -792,7 +792,7 @@ static void handleAuthPost() {
 static void handleTodoGet() {
   String b;
   b += F("<section><h2>待办预览</h2>");
-  b += F("<p class=hint>从 portal <code>GET /diary/detail</code> 拉取，需 STA 已连外网并登录。</p>");
+  b += F("<p class=hint>从 portal <code>GET /diary/detail</code> 拉取，需「同 WiFi 站点」已连外网并登录。</p>");
   b += F("<form method=POST action=/todo><div class=btn-row>"
          "<button type=submit>立即拉取</button></div></form></section>");
   sendHtml(NavTab::Todo, b);
@@ -801,7 +801,7 @@ static void handleTodoGet() {
 static void handleTodoPost() {
   String b;
   if (!wifiIsStaConnected()) {
-    b += F("<section><div class='flash err'>需要 STA 已连接外网才能拉日记</div>");
+    b += F("<section><div class='flash err'>需要「同 WiFi 站点」已连接外网才能拉日记</div>");
     b += F("<form method=POST action=/todo><div class=btn-row>"
            "<button type=submit>重试</button></div></form></section>");
     sendHtml(NavTab::Todo, b);
@@ -892,7 +892,7 @@ static void appendWeatherForm(String &b, const AppConfig &cfg, const WeatherGeoR
   b += F("</form></section>");
 
   b += F("<section><h2>搜索位置</h2>");
-  b += F("<p class=hint>经 Portal <code>/geo/v2/city/lookup</code> 调和风城市搜索；需 STA + 已登录。</p>");
+  b += F("<p class=hint>经 Portal <code>/geo/v2/city/lookup</code> 调和风城市搜索；需「同 WiFi 站点」已连接并登录。</p>");
   b += F("<form method=POST action=/weather>");
   b += F("<label>城市 / 区县名</label><input name=geo_query placeholder=\"例如 杭州 或 西湖\">");
   b += F("<div class=btn-row><button type=submit name=action value=search>搜索</button></div>");
@@ -1111,25 +1111,26 @@ static void registerRoutes() {
   g_server.on("/api/config", HTTP_GET, handleApiConfigGet);
 }
 
-bool webStart(bool force_ap) {
+bool webStart(bool force_ap, bool allow_ap_fallback) {
   webStop();
   g_ap = false;
   bool ok = false;
 
   if (!force_ap && hasSavedWifiConfig()) {
-    Serial.println("[Web] try STA...");
+    Serial.println("[Web] try WiFi...");
+    wifiStopAp();
     ok = wifiConnectSaved(15000);
   }
 
-  if (!ok) {
+  if (!ok && (force_ap || allow_ap_fallback)) {
     Serial.printf("[Web] start AP %s / %s\n", WIFI_AP_SSID, WIFI_AP_PASS);
     ok = wifiStartAp(WIFI_AP_SSID, WIFI_AP_PASS);
     g_ap = ok;
   }
 
   if (!ok) {
-    Serial.println("[Web] STA and AP both failed");
-    errorLog("web", "配置网页启动失败：STA 与热点均不可用（检查热点密码≥8位）");
+    Serial.println("[Web] WiFi and AP both failed");
+    errorLog("web", "配置网页启动失败：同 WiFi 站点与 AP 模式均不可用（检查热点密码≥8位）");
     return false;
   }
 
@@ -1156,4 +1157,5 @@ void webStop() {
 
 bool webIsRunning() { return g_running; }
 const char *webUrl() { return g_url; }
-const char *webModeName() { return g_ap ? "AP" : "STA"; }
+bool webIsAp() { return g_ap; }
+const char *webModeName() { return g_ap ? "AP 模式" : "同 WiFi 站点"; }

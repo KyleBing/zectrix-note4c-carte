@@ -19,11 +19,11 @@
 | 时钟 | PCF8563；复位后联网校一次，平时按周期 NTP（默认 30 天）；可离线手设 |
 | 相册 | Web `/album` 页内编辑（裁切/色阶/取色映射）后抖动上传 `.2bp`；BOOT 翻页；最多 30 张；可取消「展示」但仍保留文件 |
 | 多 WiFi | 最多 5 组 SSID；按 Active → 其余顺序自动连接 |
-| 配网 Web | STA 同网或 AP 热点 `Note4C-Carte` / `Note4C-Carte`（`http://192.168.4.1`） |
+| 配网 Web | 同 WiFi 站点，或 AP 模式热点 `Note4C-Carte`（`http://192.168.4.1`） |
 | Portal 登录 | `POST /portal/user/login`，JWT 落盘 |
 | Token 续签 | 响应头 `X-Access-Token`（剩余 &lt; 7 天）自动写回 |
 | 待办页 | `GET /portal/diary/detail?diaryId=`；`-` 未完成 / `=` 已完成（未完成在前） |
-| 天气 | 经 Portal `/weather/*` 代理和风；设备只配位置；BOOT 切换 NOW / 12H / 7D / 14D |
+| 天气 | 经 Portal `/weather/*` 代理和风；设备只配位置；BOOT 切换 NOW（实况+6h）/ 7D |
 | 中文显示 | LittleFS：`HZK16` + `ASC16` + `uni2gb.bin` |
 
 ---
@@ -37,7 +37,7 @@
 | 长按 **UP ~1.5s** | 启动配置 Web（已在 Web 再长按 → 强制 AP） |
 | 长按 **DOWN ~3s** | **关机**：释放 `PWR_HOLD` 并深睡；再按下键唤醒开机 |
 | 关机后按 **DOWN** | **开机 / 唤醒**（含 USB 仍供电时的假关机） |
-| 短按松开 **BOOT** | **仅 App 内功能键**：天气切 NOW→12H→7D→14D；待办/日历刷新；相册下一张；Web 中退出回 App |
+| 短按松开 **BOOT** | **仅 App 内功能键**：天气切 NOW→7D；待办/日历刷新；相册下一张；Web 中退出回 App |
 
 ### LED（空闲关闭）
 
@@ -56,7 +56,7 @@
 
 ## 3. Web 配置
 
-浏览器打开设备显示的 URL（STA IP 或 `http://192.168.4.1`）：
+浏览器打开设备显示的 URL（同 WiFi 站点的 IP，或 AP 模式 `http://192.168.4.1`）：
 
 | 路径 | 用途 |
 | --- | --- |

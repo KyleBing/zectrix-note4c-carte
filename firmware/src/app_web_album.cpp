@@ -557,6 +557,18 @@ pvCv.onpointermove=function(e){
 pvCv.onpointerup=function(){pvDrag=false;drag=false;syncCursor();};
 pvCv.onpointercancel=function(){pvDrag=false;drag=false;syncCursor();};
 pvCv.onpointerleave=function(){clearCursor();};
+function forwardWheel(e){
+  e.preventDefault();
+  e.stopPropagation();
+  const dy=e.deltaMode===1?e.deltaY*16:(e.deltaMode===2?e.deltaY*innerHeight:e.deltaY);
+  const dx=e.deltaMode===1?e.deltaX*16:(e.deltaMode===2?e.deltaX*innerWidth:e.deltaX);
+  scrollBy(dx,dy);
+}
+['srcStage','pvStage'].forEach(function(id){
+  const el=$(id);
+  if(!el) return;
+  el.addEventListener('wheel',forwardWheel,{passive:false,capture:true});
+});
 window.addEventListener('keydown',function(e){
   if(e.code!=='Space'&&e.key!==' ') return;
   if(typingTarget(e.target)) return;

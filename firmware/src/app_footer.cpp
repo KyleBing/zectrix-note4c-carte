@@ -30,6 +30,10 @@ void footerDraw(EpdSsd2683 &epd, const char *boot_action, const char *dn_action)
   if (!boot_action || !boot_action[0]) boot_action = "refresh";
   if (!dn_action || !dn_action[0]) dn_action = "next";
 
+  // Wipe anything the page body painted into the footer band (weather 16px glyphs).
+  const int fh = EpdSsd2683::kHeight - Theme::FooterY;
+  if (fh > 0) epd.fillRect(0, Theme::FooterY, EpdSsd2683::kWidth, fh, Theme::Bg);
+
   epd.drawHLine(Theme::MarginX, Theme::FooterY, 384, Theme::Fg);
 
   // Badge square sits just above 6x8 text baseline

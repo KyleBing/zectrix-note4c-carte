@@ -17,6 +17,7 @@ static constexpr int kLineHSmall = 10;
 bool fontReady() { return g_ready; }
 int fontLineHeight() { return kLineH; }
 int fontLineHeightSmall() { return kLineHSmall; }
+int fontLineHeightDouble() { return kLineH * 2; }
 
 static bool loadFile(const char *path, uint8_t **out, size_t expect = 0) {
   File f = LittleFS.open(path, "r");
@@ -111,27 +112,37 @@ static int utf8Next(const char *&p, uint32_t &cp) {
   return 1;
 }
 
-static void drawAsc(EpdSsd2683 &epd, int x, int y, char c, EpdColor fg, EpdColor bg) {
+static void blitScaled(EpdSsd2683 &epd, int x, int y, int col, int row, int scale, EpdColor c) {
+  if (scale <= 1) {
+    epd.setPixel(x + col, y + row, c);
+    return;
+  }
+  epd.fillRect(x + col * scale, y + row * scale, scale, scale, c);
+}
+
+static void drawAsc(EpdSsd2683 &epd, int x, int y, char c, EpdColor fg, EpdColor bg, int scale = 1) {
   if (!g_asc || (uint8_t)c > 127) c = '?';
   const uint8_t *glyph = g_asc + (uint8_t)c * 16;
   for (int row = 0; row < 16; row++) {
     uint8_t bits = glyph[row];
     for (int col = 0; col < 8; col++) {
       const bool on = (bits & (0x80 >> col)) != 0;
-      epd.setPixel(x + col, y + row, on ? fg : bg);
+      blitScaled(epd, x, y, col, row, scale, on ? fg : bg);
     }
   }
 }
 
-static void drawHzk(EpdSsd2683 &epd, int x, int y, uint16_t gb, EpdColor fg, EpdColor bg) {
+static void drawHzk(EpdSsd2683 &epd, int x, int y, uint16_t gb, EpdColor fg, EpdColor bg, int scale = 1) {
+  const int sc = scale <= 1 ? 1 : scale;
+  const int box = 16 * sc;
   if (!g_hzk || gb < 0xA1A1) {
-    epd.drawRect(x, y, 16, 16, fg);
+    epd.drawRect(x, y, box, box, fg);
     return;
   }
   const uint8_t hi = (gb >> 8) & 0xFF;
   const uint8_t lo = gb & 0xFF;
   if (hi < 0xA1 || lo < 0xA1) {
-    epd.drawRect(x, y, 16, 16, fg);
+    epd.drawRect(x, y, box, box, fg);
     return;
   }
   const uint32_t offset = (uint32_t)(94 * (hi - 0xA1) + (lo - 0xA1)) * 32;
@@ -141,7 +152,7 @@ static void drawHzk(EpdSsd2683 &epd, int x, int y, uint16_t gb, EpdColor fg, Epd
       uint8_t bits = m[row * 2 + byteCol];
       for (int bit = 0; bit < 8; bit++) {
         const bool on = (bits & (0x80 >> bit)) != 0;
-        epd.setPixel(x + byteCol * 8 + bit, y + row, on ? fg : bg);
+        blitScaled(epd, x, y, byteCol * 8 + bit, row, sc, on ? fg : bg);
       }
     }
   }
@@ -334,4 +345,67 @@ int fontDrawTextWrappedSmall(EpdSsd2683 &epd, int x, int y, int max_w, int max_y
   }
   if (!drew) return y;
   return cy + kLineHSmall;
+}
+
+int fontDrawTextWrappedDouble(EpdSsd2683 &epd, int x, int y, int max_w, int max_y, const char *utf8,
+                              EpdColor fg, EpdColor bg, int wrap_x) {
+  if (!utf8) return y;
+  constexpr int kScale = 2;
+  const int line_h = kLineH * kScale;
+  const int origin_x = (wrap_x >= 0) ? wrap_x : x;
+  const int right = origin_x + max_w;
+  int cx = x;
+  int cy = y;
+  bool drew = false;
+  const char *p = utf8;
+
+  auto newline = [&]() {
+    cx = origin_x;
+    cy += line_h;
+  };
+
+  int glyphs = 0;
+  while (*p && cy + line_h <= max_y) {
+    if ((++glyphs & 15) == 0) wdtPet();
+    if (*p == '\r') {
+      p++;
+      continue;
+    }
+    if (*p == '\n') {
+      p++;
+      newline();
+      continue;
+    }
+
+    uint32_t cp = 0;
+    utf8Next(p, cp);
+    const int w = glyphWidth(cp) * kScale;
+    if (cx + w > right && cx > origin_x) {
+      newline();
+      if (cy + line_h > max_y) break;
+    }
+
+    drew = true;
+    if (!g_ready) {
+      if (cp < 0x80) {
+        epd.drawChar(cx, cy + 8, (char)cp, fg, bg);
+        cx += 12;
+      } else {
+        epd.drawRect(cx, cy, 24, 24, fg);
+        cx += 24;
+      }
+      continue;
+    }
+
+    if (cp < 0x80) {
+      drawAsc(epd, cx, cy, (char)cp, fg, bg, kScale);
+      cx += 8 * kScale;
+    } else {
+      const uint16_t gb = unicodeToGb(cp);
+      drawHzk(epd, cx, cy, gb, fg, bg, kScale);
+      cx += 16 * kScale;
+    }
+  }
+  if (!drew) return y;
+  return cy + line_h;
 }

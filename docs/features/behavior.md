@@ -29,7 +29,7 @@
 | `main.cpp` | App 会话、按键路由、进/出 Web、调用各 App 刷屏 |
 | `app_power` | DOWN 长按关机、BOOT/DOWN 连击计数、空闲关机 |
 | `app_config` | NVS 配置（WiFi、Portal、App 开关、天气位置…） |
-| `app_web` | 设备端配置站（STA 或热点） |
+| `app_web` | 设备端配置站（同 WiFi 站点或 AP 模式） |
 | `app_*` | 各 App 拉数与画屏 |
 | `app_errorlog` | 错误事件环，落盘 LittleFS，Web 可查 |
 
@@ -78,7 +78,7 @@ UP / DOWN / BOOT（非 Web）短按都走同一套：**松开后静默约 500ms*
 | 场景 | BOOT | UP 短按 | UP 长按 | DOWN |
 | --- | --- | --- | --- | --- |
 | 普通 App | 页内功能（见下） | 上一个 App | 开 Web | 下一个 App / 长按关机 |
-| Web 配置页 | **立刻退出 Web**，刷回当前可用 App | （忽略切换） | 再长按 → **强制热点** | （忽略切换） |
+| Web 配置页 | **立刻退出 Web**，刷回当前可用 App | （忽略切换） | 再长按：AP → 同 WiFi 站点（或反过来） | （忽略切换） |
 
 Web 里 BOOT **不等** 500ms 连击窗，松手后尽快 `webStop()` 并 `showCurrentApp`。
 
@@ -88,7 +88,7 @@ Web 里 BOOT **不等** 500ms 连击窗，松手后尽快 `webStop()` 并 `showC
 | --- | --- |
 | 待办 | 重新拉 Portal 日记并全刷 |
 | 日历 | 重绘（必要时校时） |
-| 天气 | 切换模式 **NOW → 12H → 7D → 14D**，再拉对应接口并全刷；页内黄标指示当前档 |
+| 天气 | 切换模式 **NOW → 7D**，再拉对应接口并全刷；顶栏黄标指示当前档 |
 | 相册 | 下一张（可展示列表内） |
 
 天气切模式会先写入会话，再联网；避免拉数中途复位后「模式丢了像没按过」。
@@ -116,7 +116,7 @@ Web **设置**可关闭部分 App（至少保留一个）。
 
 ## 5. Web 配置门户
 
-长按 UP → 优先用已存 WiFi 开 STA；失败则开热点 `Note4C-Carte`。墨水屏显示 URL；手机浏览器打开。
+长按 UP → 优先用已存 WiFi 开「同 WiFi 站点」；失败则开 AP 模式热点 `Note4C-Carte`。墨水屏显示对应图标与 URL；手机浏览器打开。
 
 | 路径 | 作用 |
 | --- | --- |
@@ -154,9 +154,8 @@ Token：登录写入 NVS；若响应带 `X-Access-Token` 且剩余有效期短�
 
 | 模式 | 请求 |
 | --- | --- |
-| NOW | `/v7/weather/now` |
-| 12H | `/v7/weather/24h`（屏上取前 12） |
-| 7D / 14D | `/v7/weather/7d` / `/v7/weather/15d`（14D 截断） |
+| NOW | `/v7/weather/now` + `/v7/air/now` + `/v7/weather/24h`（实况 + 空气 + 前 6 小时柱） |
+| 7D | `/v7/weather/7d`（高低气温柱） |
 
 响应形态：`{ success, message, data }`，`data` 为和风 v7 结构（`code` / `now` / `hourly` / `daily`）。解析失败或业务失败时，屏上出错误详情，并写入错误日志。
 
@@ -174,7 +173,7 @@ Token：登录写入 NVS；若响应带 `X-Access-Token` 且剩余有效期短�
 
 - 标题区短状态（如 `err`、`cfg`）  
 - 正文 **「错误详情」** + 完整说明（可换行）  
-- 天气仍保留 NOW/12H/7D/14D 黄标，方便确认 BOOT 是否切过档  
+- 天气仍保留 header 上 NOW/7D 黄标，方便确认 BOOT 是否切过档  
 
 「已经把错误画上屏」的路径，一般**不再**走 LED 三短闪，避免「灯闪了几下、屏没动」的错觉。硬失败（如屏未就绪、网页根本起不来）仍可能三短闪。
 

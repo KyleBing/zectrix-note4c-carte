@@ -2,13 +2,11 @@
 #include "app_config.h"
 #include "app_font.h"
 #include "app_wifi.h"
-#include "app_header.h"
 #include "app_theme.h"
-#include "app_footer.h"
-#include "app_version.h"
 #include "app_errorlog.h"
 #include "app_power.h"
 #include "app_led.h"
+#include "app_gfx_icon.h"
 
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
@@ -370,6 +368,31 @@ bool weatherFetchNow(WeatherNowData &out) {
   out.vis = jsonField(now["vis"]);
   out.cloud = jsonField(now["cloud"]);
   out.ok = true;
+
+  snprintf(path, sizeof(path), "/v7/air/now?location=%s&lang=zh", cfg.qweather_location_id);
+  JsonDocument air_filter;
+  filterPortalMeta(air_filter);
+  auto fillAir = [](JsonObject a0) {
+    a0["aqi"] = true;
+    a0["category"] = true;
+    a0["pm2p5"] = true;
+  };
+  fillAir(air_filter["data"]["now"].to<JsonObject>());
+  fillAir(air_filter["now"].to<JsonObject>());
+  JsonDocument air_doc;
+  String air_err;
+  if (portalWeatherGet(path, air_doc, air_err, &air_filter)) {
+    JsonObject air_data = weatherDataObj(air_doc);
+    String air_code;
+    if (!air_data.isNull() && qweatherCodeOk(air_data["code"], air_code)) {
+      JsonObject air = air_data["now"].as<JsonObject>();
+      if (!air.isNull()) {
+        out.aqi = jsonField(air["aqi"]);
+        out.aqi_category = jsonField(air["category"]);
+        out.pm2p5 = jsonField(air["pm2p5"]);
+      }
+    }
+  }
   return true;
 }
 
@@ -405,6 +428,7 @@ bool weatherFetchHourly(const char *hours_path, WeatherHourlyData &out) {
     h0["humidity"] = true;
     h0["precip"] = true;
     h0["pop"] = true;
+    h0["icon"] = true;
   };
   fillHour(filter["data"]["hourly"][0].to<JsonObject>());
   fillHour(filter["hourly"][0].to<JsonObject>());
@@ -440,6 +464,7 @@ bool weatherFetchHourly(const char *hours_path, WeatherHourlyData &out) {
     it.humidity = jsonField(h["humidity"]);
     it.precip = jsonField(h["precip"]);
     it.pop = jsonField(h["pop"]);
+    it.icon = jsonField(h["icon"]);
   }
   out.ok = out.count > 0;
   if (!out.ok) out.message = "empty hourly";
@@ -480,6 +505,7 @@ bool weatherFetchDaily(const char *days_path, WeatherDailyData &out) {
     d0["humidity"] = true;
     d0["precip"] = true;
     d0["uvIndex"] = true;
+    d0["iconDay"] = true;
   };
   fillDay(filter["data"]["daily"][0].to<JsonObject>());
   fillDay(filter["daily"][0].to<JsonObject>());
@@ -517,23 +543,11 @@ bool weatherFetchDaily(const char *days_path, WeatherDailyData &out) {
     it.humidity = jsonField(d["humidity"]);
     it.precip = jsonField(d["precip"]);
     it.uv_index = jsonField(d["uvIndex"]);
+    it.icon_day = jsonField(d["iconDay"]);
   }
   out.ok = out.count > 0;
   if (!out.ok) out.message = "empty daily";
   return out.ok;
-}
-
-// "2024-11-19" or with time → weekday 0=Sun..6=Sat (Sakamoto)
-static int weekdayFromYmd(int y, int m, int d) {
-  static const int t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
-  if (m < 3) y -= 1;
-  return (y + y / 4 - y / 100 + y / 400 + t[m - 1] + d) % 7;
-}
-
-static const char *weekdayCn(int wd) {
-  static const char *k[] = {"日", "一", "二", "三", "四", "五", "六"};
-  if (wd < 0 || wd > 6) return "?";
-  return k[wd];
 }
 
 // Parse leading YYYY-MM-DD from qweather strings.
@@ -546,218 +560,294 @@ static bool parseYmd(const String &s, int &y, int &m, int &d) {
   return y >= 2000 && m >= 1 && m <= 12 && d >= 1 && d <= 31;
 }
 
-// Daily: "11-19 三"
-static void formatDailyLabel(const String &fx_date, char *out, size_t n) {
+static int imin(int a, int b) { return a < b ? a : b; }
+static int imax(int a, int b) { return a > b ? a : b; }
+
+static int parseTempC(const String &s) { return s.toInt(); }
+
+static int hourFromFxTime(const String &fx) {
+  const int tpos = fx.indexOf('T');
+  if (tpos > 0 && fx.length() >= (size_t)(tpos + 3)) {
+    return fx.substring(tpos + 1, tpos + 3).toInt();
+  }
+  return -1;
+}
+
+static int dayFromFxDate(const String &fx) {
   int y = 0, m = 0, d = 0;
-  if (parseYmd(fx_date, y, m, d)) {
-    snprintf(out, n, "%02d-%02d %s", m, d, weekdayCn(weekdayFromYmd(y, m, d)));
-  } else if (fx_date.length() >= 10) {
-    snprintf(out, n, "%c%c-%c%c", fx_date[5], fx_date[6], fx_date[8], fx_date[9]);
-  } else {
-    snprintf(out, n, "%s", fx_date.c_str());
-  }
+  if (parseYmd(fx, y, m, d)) return d;
+  if (fx.length() >= 10) return fx.substring(8, 10).toInt();
+  return -1;
 }
 
-// Hourly fxTime "2024-11-19T15:00+08:00" → "11-19 15:00"
-static void formatHourlyLabel(const String &fx_time, char *out, size_t n) {
-  int y = 0, m = 0, d = 0;
-  const int tpos = fx_time.indexOf('T');
-  if (parseYmd(fx_time, y, m, d) && tpos > 0 && fx_time.length() >= (size_t)(tpos + 6)) {
-    snprintf(out, n, "%02d-%02d %c%c:%c%c", m, d, fx_time[tpos + 1], fx_time[tpos + 2],
-             fx_time[tpos + 4], fx_time[tpos + 5]);
-  } else if (tpos > 0 && fx_time.length() >= (size_t)(tpos + 6)) {
-    snprintf(out, n, "%c%c:%c%c", fx_time[tpos + 1], fx_time[tpos + 2], fx_time[tpos + 4],
-             fx_time[tpos + 5]);
-  } else {
-    snprintf(out, n, "%s", fx_time.c_str());
-  }
+static constexpr int kWxEdge = 10;
+static constexpr int kWxPadY = kWxEdge + 15;  // 上下再各 +15
+
+struct WeatherChartCol {
+  int t_hi = 0;
+  int t_lo = 0;
+  WxIcon icon = WxIcon::Cloudy;
+  char above[12] = {};   // 小时：柱顶气温
+  char cap1[16] = {};    // 大字第 1 行（小时时间 / 日日期）
+  char cap2[16] = {};    // 大字第 2 行（日·周几）
+};
+
+static int weekdayFromYmd(int y, int m, int d) {
+  static const int t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+  if (m < 3) y -= 1;
+  return (y + y / 4 - y / 100 + y / 400 + t[m - 1] + d) % 7;
 }
 
-// obsTime same ISO family → "11-19 15:04"
-static void formatObsLabel(const String &obs, char *out, size_t n) {
-  formatHourlyLabel(obs, out, n);
+static const char *weekdayCn(int wd) {
+  static const char *k[] = {"日", "一", "二", "三", "四", "五", "六"};
+  if (wd < 0 || wd > 6) return "?";
+  return k[wd];
 }
 
-static void drawWeatherHeader(EpdSsd2683 &epd, WeatherMode mode, const char *status) {
-  // title/location may include CJK — must use HZK font, not 6x8 drawText (else ???)
-  // chrome_left = app indicator; never draw status over it (was covering dots with "OK").
-  const int chrome_left = headerDrawAppBar(epd, AppId::Weather, nullptr);
-  (void)mode;
-  const AppConfig &cfg = getAppConfig();
-  char head[96];
-  if (cfg.qweather_location_name[0]) {
-    snprintf(head, sizeof(head), "天气 · %s", cfg.qweather_location_name);
-  } else {
-    snprintf(head, sizeof(head), "天气");
-  }
-  const int title_max = chrome_left - Theme::MarginX - 8;
-  if (title_max > 40) {
-    fontDrawTextWrapped(epd, Theme::MarginX, 3, title_max, Theme::HeaderH, head, Theme::HeaderFg,
-                        Theme::HeaderBg);
-  }
-  // Only show failure status; success is obvious from content. Keep left of indicator.
-  if (status && status[0] && strcmp(status, "OK") != 0) {
-    const int sw = (int)strlen(status) * 6;
-    const int sx = chrome_left - 6 - sw;
-    if (sx > Theme::MarginX + 48) {
-      epd.drawText(sx, 7, status, Theme::HeaderAccent, Theme::HeaderBg);
-    }
-  }
-}
-
-// BOOT cycles these; yellow pill marks the active window so a mode change is obvious.
-static int drawWeatherModeTabs(EpdSsd2683 &epd, WeatherMode mode, int y) {
-  static const char *kLabel[] = {"NOW", "12H", "7D", "14D"};
-  int x = Theme::MarginX;
-  for (int i = 0; i < static_cast<int>(WeatherMode::Count); i++) {
-    const char *lab = kLabel[i];
-    const int tw = (int)strlen(lab) * 6;
-    const int pad = 4;
-    const int bw = tw + pad * 2;
-    const int bh = 12;
-    const bool sel = (i == static_cast<int>(mode));
-    if (sel) {
-      epd.fillRect(x, y, bw, bh, Theme::Accent);
-      epd.drawText(x + pad, y + 2, lab, Theme::Fg, Theme::Accent);
+static int largeTextWidth(const char *s) {
+  int w = 0;
+  const unsigned char *p = reinterpret_cast<const unsigned char *>(s);
+  while (*p) {
+    if (*p < 0x80) {
+      w += 8;
+      p++;
+    } else if ((*p & 0xE0) == 0xC0 && p[1]) {
+      w += 16;
+      p += 2;
+    } else if ((*p & 0xF0) == 0xE0 && p[1] && p[2]) {
+      w += 16;
+      p += 3;
+    } else if ((*p & 0xF8) == 0xF0 && p[1] && p[2] && p[3]) {
+      w += 16;
+      p += 4;
     } else {
-      epd.drawRect(x, y, bw, bh, Theme::Fg);
-      epd.drawText(x + pad, y + 2, lab, Theme::Fg);
+      p++;
     }
-    x += bw + 6;
   }
-  return y + 16;
+  return w;
 }
 
-static void drawWeatherFooter(EpdSsd2683 &epd) {
-  footerDraw(epd, "mode");
+static int mapTempY(int t, int t_min, int t_max, int y_top, int y_bot) {
+  if (t_max <= t_min) t_max = t_min + 1;
+  return y_top + (int)((long)(t_max - t) * (y_bot - y_top) / (t_max - t_min));
 }
+
+static void drawCenteredLarge(EpdSsd2683 &epd, int cx, int y, int max_y, const char *s,
+                              EpdColor fg = Theme::Fg) {
+  if (!s || !s[0]) return;
+  const int tw = largeTextWidth(s);
+  int x = cx - tw / 2;
+  if (x < kWxEdge) x = kWxEdge;
+  fontDrawTextWrapped(epd, x, y, EpdSsd2683::kWidth - kWxEdge - x, max_y, s, fg);
+}
+
+static void drawTempRangeChart(EpdSsd2683 &epd, int y, int bottom, const WeatherChartCol *cols,
+                               int n, bool hourly) {
+  if (!cols || n <= 0) return;
+  const int plot_x = kWxEdge;
+  const int plot_r = EpdSsd2683::kWidth - kWxEdge;
+  const int plot_w = plot_r - plot_x;
+  if (plot_w < 24) return;
+  const int slot = plot_w / n;
+  int icon_sz = slot - 4;
+  if (icon_sz > 40) icon_sz = 40;
+  if (icon_sz < 16) icon_sz = 16;
+
+  const int lh = fontLineHeight();
+  constexpr int kDateWdGap = 3;  // 7d：日期与周几之间
+  const int cap_h = hourly ? lh : (lh * 2 + kDateWdGap);
+  const int above_h = lh + 3;
+  const int min_lab_h = hourly ? 0 : (lh + 3);
+  const int y_top = y + icon_sz + 5 + above_h;
+  const int y_bot = bottom - cap_h - 5 - min_lab_h;
+  if (y_bot - y_top < 20) return;
+
+  int t_min = cols[0].t_lo;
+  int t_max = cols[0].t_hi;
+  for (int i = 1; i < n; i++) {
+    t_min = imin(t_min, cols[i].t_lo);
+    t_max = imax(t_max, cols[i].t_hi);
+  }
+  t_min -= 1;
+  t_max += 1;
+  if (t_max <= t_min) t_max = t_min + 1;
+
+  int bar_w = slot * 2 / 3;
+  if (bar_w < 6) bar_w = 6;
+  if (bar_w > 20) bar_w = 20;
+
+  for (int i = 0; i < n; i++) {
+    const int cx = plot_x + slot * i + slot / 2;
+    wxIconDraw(epd, cx - icon_sz / 2, y, cols[i].icon, icon_sz);
+
+    int y_hi = mapTempY(cols[i].t_hi, t_min, t_max, y_top, y_bot);
+    int y_lo = mapTempY(cols[i].t_lo, t_min, t_max, y_top, y_bot);
+    if (y_lo < y_hi) {
+      const int tmp = y_hi;
+      y_hi = y_lo;
+      y_lo = tmp;
+    }
+    if (hourly) {
+      int h = y_bot - y_hi + 1;
+      if (h < 4) h = 4;
+      y_hi = y_bot - h + 1;
+      y_lo = y_bot;
+    } else if (y_lo - y_hi + 1 < 6) {
+      y_lo = y_hi + 5;
+      if (y_lo > y_bot) {
+        y_lo = y_bot;
+        y_hi = imax(y_top, y_lo - 5);
+      }
+    }
+    const int bx = cx - bar_w / 2;
+    epd.fillRect(bx, y_hi, bar_w, y_lo - y_hi + 1, Theme::Alert);
+
+    if (hourly) {
+      drawCenteredLarge(epd, cx, y_hi - 3 - lh, y_hi, cols[i].above, Theme::Alert);
+    } else {
+      char hi_s[8], lo_s[8];
+      snprintf(hi_s, sizeof(hi_s), "%d", cols[i].t_hi);
+      snprintf(lo_s, sizeof(lo_s), "%d", cols[i].t_lo);
+      drawCenteredLarge(epd, cx, y_hi - 3 - lh, y_hi, hi_s, Theme::Alert);
+      drawCenteredLarge(epd, cx, y_lo + 4, y_lo + 4 + lh, lo_s, Theme::Alert);
+    }
+
+    int cy = y_bot + 5 + min_lab_h;
+    if (hourly) {
+      drawCenteredLarge(epd, cx, cy, bottom, cols[i].cap1);
+    } else {
+      drawCenteredLarge(epd, cx, cy, cy + lh, cols[i].cap1);
+      drawCenteredLarge(epd, cx, cy + lh + kDateWdGap, bottom, cols[i].cap2);
+    }
+  }
+}
+
+static int wxTop() { return kWxPadY; }
+static int wxBottom() { return EpdSsd2683::kHeight - kWxPadY; }
 
 static int drawErrorBody(EpdSsd2683 &epd, int y, const char *msg) {
-  y = fontDrawTextWrapped(epd, Theme::MarginX, y, 384, Theme::FooterY - 4, "错误详情",
-                          Theme::Alert);
+  y = fontDrawTextWrapped(epd, kWxEdge, y, 380, wxBottom(), "错误详情", Theme::Alert);
   y += 4;
-  return fontDrawTextWrapped(epd, Theme::MarginX, y, 384, Theme::FooterY - 4,
+  return fontDrawTextWrapped(epd, kWxEdge, y, 380, wxBottom(),
                              msg && msg[0] ? msg : "(unknown error)", Theme::Fg);
 }
 
 static void drawErrorPage(EpdSsd2683 &epd, WeatherMode mode, const char *msg, const char *status) {
+  (void)mode;
+  (void)status;
   epd.clear(Theme::Bg);
-  drawWeatherHeader(epd, mode, status);
-  int y = drawWeatherModeTabs(epd, mode, 26);
-  drawErrorBody(epd, y, msg);
-  drawWeatherFooter(epd);
+  drawErrorBody(epd, wxTop(), msg);
   epd.display();
 }
 
-void weatherDrawNow(EpdSsd2683 &epd, const WeatherNowData &d, const char *status) {
+void weatherDrawNow(EpdSsd2683 &epd, const WeatherNowData &now, const WeatherHourlyData &hourly,
+                    const char *status) {
+  (void)status;
   epd.clear(Theme::Bg);
-  drawWeatherHeader(epd, WeatherMode::Now, status);
-  int y = drawWeatherModeTabs(epd, WeatherMode::Now, 26);
-  if (!d.ok) {
-    drawErrorBody(epd, y, d.message.length() ? d.message.c_str() : "(error)");
+  int y = wxTop();
+  const int bottom = wxBottom();
+  if (!now.ok) {
+    drawErrorBody(epd, y, now.message.length() ? now.message.c_str() : "(error)");
   } else {
     char line[112];
-    char when[24];
-    formatObsLabel(d.obs_time, when, sizeof(when));
-    snprintf(line, sizeof(line), "%s  %sC  体感%sC", d.text.c_str(), d.temp.c_str(),
-             d.feels_like.c_str());
-    y = fontDrawTextWrapped(epd, Theme::MarginX, y, 384, Theme::FooterY - 4, line, Theme::Alert);
-    y += 6;
-    snprintf(line, sizeof(line), "风 %s %s级", d.wind_dir.c_str(), d.wind_scale.c_str());
-    y = fontDrawTextWrapped(epd, Theme::MarginX, y, 384, Theme::FooterY - 4, line, Theme::Fg);
-    snprintf(line, sizeof(line), "湿度 %s%%  降水 %smm", d.humidity.c_str(), d.precip.c_str());
-    y = fontDrawTextWrapped(epd, Theme::MarginX, y, 384, Theme::FooterY - 4, line, Theme::Fg);
-    snprintf(line, sizeof(line), "气压 %shPa  能见度 %skm", d.pressure.c_str(), d.vis.c_str());
-    y = fontDrawTextWrapped(epd, Theme::MarginX, y, 384, Theme::FooterY - 4, line, Theme::Fg);
-    if (when[0]) {
-      y += 6;
-      snprintf(line, sizeof(line), "观测 %s", when);
-      fontDrawTextWrapped(epd, Theme::MarginX, y, 384, Theme::FooterY - 4, line, Theme::Accent);
+    const int big = 90;
+    wxIconDraw(epd, kWxEdge, y, wxIconFromCode(now.icon.c_str()), big);
+    const int tx = kWxEdge + big + 8;
+    const AppConfig &cfg = getAppConfig();
+    const char *loc = cfg.qweather_location_name;
+    int loc_col = 0;
+    if (loc && loc[0]) {
+      loc_col = largeTextWidth(loc) * 2;
+      if (loc_col > 160) loc_col = 160;
+      if (loc_col < 32) loc_col = 32;
     }
-  }
-  drawWeatherFooter(epd);
-  epd.display();
-}
-
-void weatherDrawHourly(EpdSsd2683 &epd, const WeatherHourlyData &d, const char *status) {
-  epd.clear(Theme::Bg);
-  drawWeatherHeader(epd, WeatherMode::Hour12, status);
-  int y = drawWeatherModeTabs(epd, WeatherMode::Hour12, 26);
-  if (!d.ok || d.count <= 0) {
-    drawErrorBody(epd, y, d.message.length() ? d.message.c_str() : "(no hourly)");
-  } else {
-    // One row per hour: "11-19 15:00  12C  多云  东北风3"
-    char label[20];
-    char line[128];
-    for (int i = 0; i < d.count; i++) {
-      if (y + fontLineHeight() > Theme::FooterY - 4) {
-        fontDrawTextWrapped(epd, Theme::MarginX, y, 384, Theme::FooterY - 4, "…", Theme::Alert);
-        break;
+    int loc_x = EpdSsd2683::kWidth - kWxEdge - loc_col;
+    int tw = EpdSsd2683::kWidth - tx - kWxEdge;
+    if (loc_col > 0) {
+      tw = loc_x - 8 - tx;
+      if (tw < 96) {
+        loc_col = imax(32, loc_col - (96 - tw));
+        loc_x = EpdSsd2683::kWidth - kWxEdge - loc_col;
+        tw = loc_x - 8 - tx;
       }
-      const WeatherHourlyItem &it = d.hours[i];
-      formatHourlyLabel(it.fx_time, label, sizeof(label));
-      if (it.wind_dir.length() || it.wind_scale.length()) {
-        snprintf(line, sizeof(line), "%s  %sC  %s  %s%s", label, it.temp.c_str(), it.text.c_str(),
-                 it.wind_dir.c_str(), it.wind_scale.c_str());
+    }
+    int ty = y;
+    snprintf(line, sizeof(line), "%s  %sC", now.text.c_str(), now.temp.c_str());
+    ty = fontDrawTextWrapped(epd, tx, ty, tw, bottom, line, Theme::Alert) + 3;
+    snprintf(line, sizeof(line), "湿度 %s%%  体感 %sC", now.humidity.c_str(), now.feels_like.c_str());
+    ty = fontDrawTextWrapped(epd, tx, ty, tw, bottom, line, Theme::Fg) + 3;
+    if (now.aqi_category.length() || now.aqi.length()) {
+      if (now.pm2p5.length()) {
+        snprintf(line, sizeof(line), "空气 %s %s  PM2.5 %s", now.aqi_category.c_str(),
+                 now.aqi.c_str(), now.pm2p5.c_str());
       } else {
-        snprintf(line, sizeof(line), "%s  %sC  %s", label, it.temp.c_str(), it.text.c_str());
+        snprintf(line, sizeof(line), "空气 %s %s", now.aqi_category.c_str(), now.aqi.c_str());
       }
-      y = fontDrawTextWrapped(epd, Theme::MarginX, y, 384, Theme::FooterY - 4, line, Theme::Fg);
-      y += 1;
+      ty = fontDrawTextWrapped(epd, tx, ty, tw, bottom, line, Theme::Fg) + 3;
+    }
+    if (now.wind_dir.length() || now.wind_scale.length()) {
+      snprintf(line, sizeof(line), "风 %s %s级", now.wind_dir.c_str(), now.wind_scale.c_str());
+      ty = fontDrawTextWrapped(epd, tx, ty, tw, bottom, line, Theme::Fg);
+    }
+    if (loc_col > 0) {
+      fontDrawTextWrappedDouble(epd, loc_x, y, loc_col, y + big, loc, Theme::Fg);
+    }
+    y = imax(y + big, ty) + 4;
+    if (!hourly.ok || hourly.count <= 0) {
+      drawErrorBody(epd, y, hourly.message.length() ? hourly.message.c_str() : "(no 6h)");
+    } else {
+      WeatherChartCol cols[WEATHER_HOURLY_MAX];
+      const int n = imin(hourly.count, WEATHER_HOURLY_MAX);
+      for (int i = 0; i < n; i++) {
+        const int t = parseTempC(hourly.hours[i].temp);
+        cols[i].t_hi = t;
+        cols[i].t_lo = t;
+        snprintf(cols[i].above, sizeof(cols[i].above), "%d", t);
+        const int hh = hourFromFxTime(hourly.hours[i].fx_time);
+        if (hh >= 0) snprintf(cols[i].cap1, sizeof(cols[i].cap1), "%d时", hh);
+        cols[i].icon = wxIconFromCode(hourly.hours[i].icon.c_str());
+      }
+      drawTempRangeChart(epd, y, bottom, cols, n, true);
     }
   }
-  drawWeatherFooter(epd);
   epd.display();
 }
 
 void weatherDrawForecast(EpdSsd2683 &epd, const WeatherDailyData &d, WeatherMode mode,
                          const char *status) {
+  (void)mode;
+  (void)status;
   epd.clear(Theme::Bg);
-  drawWeatherHeader(epd, mode, status);
-  int y = drawWeatherModeTabs(epd, mode, 26);
+  const int y = wxTop();
   if (!d.ok || d.count <= 0) {
     drawErrorBody(epd, y, d.message.length() ? d.message.c_str() : "(error)");
   } else {
-    // One row per day. 14D uses smaller glyphs so 14 rows fit.
-    const bool compact = (mode == WeatherMode::Week14) || (d.count > 8);
-    char label[24];
-    char line[128];
-    for (int i = 0; i < d.count; i++) {
-      const int row_h = compact ? fontLineHeightSmall() : fontLineHeight();
-      if (y + row_h > Theme::FooterY - 4) {
-        if (compact) {
-          fontDrawTextWrappedSmall(epd, Theme::MarginX, y, 384, Theme::FooterY - 4, "…",
-                                   Theme::Alert);
-        } else {
-          fontDrawTextWrapped(epd, Theme::MarginX, y, 384, Theme::FooterY - 4, "…", Theme::Alert);
-        }
-        break;
-      }
-      const WeatherDailyItem &it = d.days[i];
-      formatDailyLabel(it.fx_date, label, sizeof(label));
-      // "11-19 三  3~12C  晴 / 多云"
-      if (it.text_night.length() && it.text_night != it.text_day) {
-        snprintf(line, sizeof(line), "%s  %s~%sC  %s/%s", label, it.temp_min.c_str(),
-                 it.temp_max.c_str(), it.text_day.c_str(), it.text_night.c_str());
+    WeatherChartCol cols[WEATHER_DAILY_MAX];
+    const int n = imin(d.count, WEATHER_DAILY_MAX);
+    for (int i = 0; i < n; i++) {
+      const int hi = parseTempC(d.days[i].temp_max);
+      const int lo = parseTempC(d.days[i].temp_min);
+      cols[i].t_hi = imax(hi, lo);
+      cols[i].t_lo = imin(hi, lo);
+      int ymd_y = 0, ymd_m = 0, ymd_d = 0;
+      if (parseYmd(d.days[i].fx_date, ymd_y, ymd_m, ymd_d)) {
+        snprintf(cols[i].cap1, sizeof(cols[i].cap1), "%02d/%02d", ymd_m, ymd_d);
+        snprintf(cols[i].cap2, sizeof(cols[i].cap2), "周%s",
+                 weekdayCn(weekdayFromYmd(ymd_y, ymd_m, ymd_d)));
       } else {
-        snprintf(line, sizeof(line), "%s  %s~%sC  %s", label, it.temp_min.c_str(),
-                 it.temp_max.c_str(), it.text_day.c_str());
+        const int dd = dayFromFxDate(d.days[i].fx_date);
+        if (dd >= 0) snprintf(cols[i].cap1, sizeof(cols[i].cap1), "%02d", dd);
       }
-      if (compact) {
-        y = fontDrawTextWrappedSmall(epd, Theme::MarginX, y, 384, Theme::FooterY - 4, line,
-                                     Theme::Fg);
-      } else {
-        y = fontDrawTextWrapped(epd, Theme::MarginX, y, 384, Theme::FooterY - 4, line, Theme::Fg);
-      }
-      y += 1;
+      cols[i].icon = wxIconFromCode(d.days[i].icon_day.c_str());
     }
+    drawTempRangeChart(epd, y, wxBottom(), cols, n, false);
   }
-  drawWeatherFooter(epd);
   epd.display();
 }
 
 bool weatherShowMode(EpdSsd2683 &epd, WeatherMode mode) {
   WdtLongOpGuard wdt;  // fetch + 记日志 + 排版，直到 epd.display 自己再套一层
+  mode = weatherModeNormalize(mode);
   if (!epd.ok()) {
     errorLog("weather", "EPD not ready");
     return false;
@@ -771,29 +861,26 @@ bool weatherShowMode(EpdSsd2683 &epd, WeatherMode mode) {
   }
 
   switch (mode) {
+    case WeatherMode::Hour12:
     case WeatherMode::Now: {
-      const bool ok = weatherFetchNow(g_now_buf);
-      if (!ok) errorLog("weather", g_now_buf.message.length() ? g_now_buf.message : "now fetch failed");
-      weatherDrawNow(epd, g_now_buf, ok ? "OK" : "err");
+      const bool ok_now = weatherFetchNow(g_now_buf);
+      if (!ok_now) {
+        errorLog("weather", g_now_buf.message.length() ? g_now_buf.message : "now fetch failed");
+      }
+      const bool ok_h = weatherFetchHourly("24h", g_hourly_buf);
+      if (!ok_h) {
+        errorLog("weather",
+                 g_hourly_buf.message.length() ? g_hourly_buf.message : "hourly fetch failed");
+      }
+      const char *st = (!ok_now || !ok_h) ? "err" : "OK";
+      weatherDrawNow(epd, g_now_buf, g_hourly_buf, st);
       return true;
     }
-    case WeatherMode::Hour12: {
-      const bool ok = weatherFetchHourly("24h", g_hourly_buf);  // API min 24h; UI shows first 12
-      if (!ok) errorLog("weather", g_hourly_buf.message.length() ? g_hourly_buf.message : "hourly fetch failed");
-      weatherDrawHourly(epd, g_hourly_buf, ok ? "OK" : "err");
-      return true;
-    }
+    case WeatherMode::Week14:
     case WeatherMode::Week7: {
       const bool ok = weatherFetchDaily("7d", g_daily_buf);
       if (!ok) errorLog("weather", g_daily_buf.message.length() ? g_daily_buf.message : "daily 7d failed");
-      weatherDrawForecast(epd, g_daily_buf, mode, ok ? "OK" : "err");
-      return true;
-    }
-    case WeatherMode::Week14: {
-      const bool ok = weatherFetchDaily("15d", g_daily_buf);
-      if (ok && g_daily_buf.count > 14) g_daily_buf.count = 14;  // show 14 days
-      if (!ok) errorLog("weather", g_daily_buf.message.length() ? g_daily_buf.message : "daily 14d failed");
-      weatherDrawForecast(epd, g_daily_buf, mode, ok ? "OK" : "err");
+      weatherDrawForecast(epd, g_daily_buf, WeatherMode::Week7, ok ? "OK" : "err");
       return true;
     }
     default:

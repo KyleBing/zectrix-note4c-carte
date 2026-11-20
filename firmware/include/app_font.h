@@ -20,3 +20,8 @@ int fontDrawTextWrappedSmall(EpdSsd2683 &epd, int x, int y, int max_w, int max_y
 
 int fontLineHeight();
 int fontLineHeightSmall();
+int fontLineHeightDouble();  // 32px：ASCII 16x32 + CJK 32x32
+
+// 2× HZK/ASC（像素放大），给天气地点等标题用。
+int fontDrawTextWrappedDouble(EpdSsd2683 &epd, int x, int y, int max_w, int max_y, const char *utf8,
+                              EpdColor fg = EPD_BLACK, EpdColor bg = EPD_WHITE, int wrap_x = -1);

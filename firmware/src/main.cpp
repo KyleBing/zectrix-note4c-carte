@@ -34,6 +34,7 @@
 #include "app_rtc.h"
 #include "app_version.h"
 #include "app_errorlog.h"
+#include "app_gfx_icon.h"
 
 static EpdSsd2683 epd;
 static AppId g_app = AppId::Todo;
@@ -88,7 +89,56 @@ static void skipApps(int steps) {
   if (g_app == AppId::Weather) g_weather_mode = WeatherMode::Now;
 }
 
-static void drawConfigWebPage(bool ok, bool forced_ap) {
+static int utf8TextWidth(const char *s) {
+  int w = 0;
+  const uint8_t *p = reinterpret_cast<const uint8_t *>(s);
+  while (*p) {
+    if (*p < 0x80) {
+      w += 8;
+      p++;
+    } else if ((*p & 0xE0) == 0xC0 && p[1]) {
+      w += 16;
+      p += 2;
+    } else if ((*p & 0xF0) == 0xE0 && p[1] && p[2]) {
+      w += 16;
+      p += 3;
+    } else if ((*p & 0xF8) == 0xF0 && p[1] && p[2] && p[3]) {
+      w += 16;
+      p += 4;
+    } else {
+      w += 8;
+      p++;
+    }
+  }
+  return w;
+}
+
+// Web 路径以黄底黑框 tab 画出。返回 tab 区底边 y。
+static int drawWebPageTabs(int x, int y, int max_w) {
+  static const char *kTabs[] = {"状态", "设置", "WiFi", "鉴权", "待办", "天气", "相册", "错误", "帮助"};
+  constexpr int kPadX = 5;
+  constexpr int kPadY = 3;
+  constexpr int kGap = 4;
+  constexpr int kTh = 16 + kPadY * 2;
+  int cx = x;
+  int cy = y;
+  for (const char *label : kTabs) {
+    const int tw = utf8TextWidth(label);
+    const int twid = tw + kPadX * 2;
+    if (cx + twid > x + max_w && cx > x) {
+      cx = x;
+      cy += kTh + kGap;
+    }
+    epd.fillRect(cx, cy, twid, kTh, Theme::Accent);
+    epd.drawRect(cx, cy, twid, kTh, Theme::Fg);
+    fontDrawTextWrapped(epd, cx + kPadX, cy + kPadY, tw, cy + kPadY + 16, label, Theme::Fg,
+                        Theme::Accent);
+    cx += twid + kGap;
+  }
+  return cy + kTh;
+}
+
+static void drawConfigWebPage(bool ok) {
   if (!epd.ok()) return;
   epd.clear(Theme::Bg);
   epd.fillRect(0, 0, 400, Theme::HeaderH, Theme::HeaderBg);
@@ -104,31 +154,47 @@ static void drawConfigWebPage(bool ok, bool forced_ap) {
     return;
   }
 
+  constexpr int kGap = 3;
+  constexpr int kMaxY = Theme::FooterY - 4;
+  constexpr int kPad = 8;
   char line[64];
-  snprintf(line, sizeof(line), "模式：%s", strcmp(webModeName(), "AP") == 0 ? "热点" : "无线网");
-  fontDrawTextWrapped(epd, 8, 36, 384, 260, line, Theme::Fg);
+  const bool ap = webIsAp();
+  const int icon_sz = 50;
+  const int banner_y = Theme::HeaderH;
+  const int banner_h = kPad + icon_sz + kPad;
+  epd.fillRect(0, banner_y, 400, banner_h, Theme::HeaderBg);
+  webModeIconDraw(epd, kPad, banner_y + kPad, ap, icon_sz, false);
+  const int tx = kPad + icon_sz + kPad;
+  const int tw = 400 - tx - kPad;
+  int ty = banner_y + kPad;
+  ty = fontDrawTextWrapped(epd, tx, ty, tw, banner_y + banner_h, webModeName(), Theme::HeaderAccent,
+                           Theme::HeaderBg);
   snprintf(line, sizeof(line), "地址：%s", webUrl());
-  fontDrawTextWrapped(epd, 8, 56, 384, 260, line, Theme::Alert);
-  int y = 80;
-  if (strcmp(webModeName(), "AP") == 0 || forced_ap) {
+  fontDrawTextWrapped(epd, tx, ty, tw, banner_y + banner_h, line, Theme::HeaderFg, Theme::HeaderBg);
+  int y = banner_y + banner_h + kGap;
+  if (ap) {
     snprintf(line, sizeof(line), "热点名 %s", WIFI_AP_SSID);
-    y = fontDrawTextWrapped(epd, 8, y, 384, 260, line, Theme::Fg);
+    y = fontDrawTextWrapped(epd, 8, y, 384, kMaxY, line, Theme::Fg) + kGap;
     snprintf(line, sizeof(line), "密码 %s", WIFI_AP_PASS);
-    y = fontDrawTextWrapped(epd, 8, y, 384, 260, line, Theme::Fg);
-    y = fontDrawTextWrapped(epd, 8, y + 4, 384, 260, "手机连此热点后，用浏览器打开上面的地址", Theme::Fg);
+    y = fontDrawTextWrapped(epd, 8, y, 384, kMaxY, line, Theme::Fg) + kGap;
+    y = fontDrawTextWrapped(epd, 8, y, 384, kMaxY, "手机连此热点后，用浏览器打开上面的地址", Theme::Fg) +
+        kGap;
   } else {
-    y = fontDrawTextWrapped(epd, 8, y, 384, 260, "请与手机连同一 WiFi，浏览器打开上面的地址", Theme::Fg);
+    y = fontDrawTextWrapped(epd, 8, y, 384, kMaxY, "请与手机连同一 WiFi，浏览器打开上面的地址", Theme::Fg) +
+        kGap;
   }
-  y = fontDrawTextWrapped(epd, 8, y + 8, 384, 260, "页面：状态、设置、LED、WiFi、鉴权、待办、天气、相册", Theme::Fg);
-  y = fontDrawTextWrapped(epd, 8, y + 4, 384, 260, "长按上键：强制开热点", Theme::Fg);
-  y = fontDrawTextWrapped(epd, 8, y, 384, 260, "BOOT 键：退出配置，返回应用", Theme::Fg);
-  y = fontDrawTextWrapped(epd, 8, y, 384, 260, "长按下键约 3 秒：关机；再按下键开机", Theme::Fg);
+  y = drawWebPageTabs(8, y + 2, 384) + 8;
+  y = fontDrawTextWrapped(epd, 8, y, 384, kMaxY,
+                          ap ? "长按上键：改用同 WiFi 站点" : "长按上键：改用 AP 模式", Theme::Fg) +
+      kGap;
+  y = fontDrawTextWrapped(epd, 8, y, 384, kMaxY, "BOOT 键：退出配置，返回应用", Theme::Fg) + kGap;
+  y = fontDrawTextWrapped(epd, 8, y, 384, kMaxY, "长按下键约 3 秒：关机；再按下键开机", Theme::Fg) + kGap;
   const uint32_t idle = getAppConfig().idle_off_sec;
   if (idle == 0) {
-    fontDrawTextWrapped(epd, 8, y, 384, 260, "无操作自动关机：关闭（配置页期间不会关）", Theme::Fg);
+    fontDrawTextWrapped(epd, 8, y, 384, kMaxY, "无操作自动关机：关闭（配置页期间不会关）", Theme::Fg);
   } else {
     snprintf(line, sizeof(line), "无操作 %u 秒后关机（配置页期间不会关）", (unsigned)idle);
-    fontDrawTextWrapped(epd, 8, y, 384, 260, line, Theme::Fg);
+    fontDrawTextWrapped(epd, 8, y, 384, kMaxY, line, Theme::Fg);
   }
   epd.display();
 }
@@ -216,7 +282,7 @@ void setup() {
   if (loadUiSession(saved_app, saved_wx, saved_alb) && saved_app < static_cast<uint8_t>(AppId::Count)) {
     g_app = static_cast<AppId>(saved_app);
     if (saved_wx < static_cast<uint8_t>(WeatherMode::Count)) {
-      g_weather_mode = static_cast<WeatherMode>(saved_wx);
+      g_weather_mode = weatherModeNormalize(static_cast<WeatherMode>(saved_wx));
     }
     g_album_index = saved_alb;
     Serial.printf("[UI] restore app=%s wx=%s alb=%d\n", appIdName(g_app),
@@ -363,11 +429,27 @@ void loop() {
       busy = true;
       ledAckFlash();
       ledSet(LedPattern::BlinkSlow);
-      const bool force_ap = in_web;
-      Serial.printf("[UI] UP long -> %s web\n", force_ap ? "force AP" : "config");
-      const bool ok = webStart(force_ap);
+      bool force_ap = false;
+      bool allow_ap = true;
+      if (in_web) {
+        if (webIsAp()) {
+          force_ap = false;
+          allow_ap = false;
+          Serial.println("[UI] UP long -> WiFi mode");
+        } else {
+          force_ap = true;
+          Serial.println("[UI] UP long -> AP mode");
+        }
+      } else {
+        Serial.println("[UI] UP long -> config web");
+      }
+      bool ok = webStart(force_ap, allow_ap);
+      if (!ok && in_web && !force_ap) {
+        Serial.println("[UI] WiFi failed, restore AP");
+        ok = webStart(true);
+      }
       ledSet(ok ? LedPattern::Breathe : LedPattern::ErrorBurst);
-      drawConfigWebPage(ok, force_ap);
+      drawConfigWebPage(ok);
       ledSet(ok ? LedPattern::Off : LedPattern::ErrorBurst);
       suppressKeys(500);
       busy = false;
