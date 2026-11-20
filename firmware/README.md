@@ -79,6 +79,6 @@ esptool.py --chip esp32s3 write_flash \
 
 ## Web
 
-`/` 状态 · `/settings` 设置（应用开关 / 电源 / 时间）· `/led` LED 闪烁含义 · `/wifi` · `/auth` · `/todo` · `/weather` · `/album`
+`/` 状态 · `/settings` 设置（应用开关 / 电源 / 时间）· `/help` 帮助（含 LED）· `/wifi` · `/auth` · `/todo` · `/weather` · `/album`
 
 JWT：登录保存；业务响应若带 `X-Access-Token` 则自动更新（portal-go 剩余 &lt; 7 天续签）。

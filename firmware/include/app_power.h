@@ -30,3 +30,16 @@ void powerIdleTouch();
 void powerIdleSetTimeoutSec(uint32_t sec);
 uint32_t powerIdleTimeoutSec();
 void powerIdlePoll(bool inhibit);
+
+// Pet task WDT + yield. Call from blocking waits (EPD, HTTP body, WiFi).
+void wdtPet();
+
+// Temporarily unsubscribe whatever TWDT already watches (loop / idle0 / idle1).
+// Restores only those; does not newly enable loop WDT. Nested.
+void wdtLongOpBegin();
+void wdtLongOpEnd();
+
+struct WdtLongOpGuard {
+  WdtLongOpGuard() { wdtLongOpBegin(); }
+  ~WdtLongOpGuard() { wdtLongOpEnd(); }
+};

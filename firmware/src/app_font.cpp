@@ -1,4 +1,5 @@
 #include "app_font.h"
+#include "app_power.h"
 
 #include <FS.h>
 #include <LittleFS.h>
@@ -226,7 +227,9 @@ int fontDrawTextWrapped(EpdSsd2683 &epd, int x, int y, int max_w, int max_y, con
     cy += kLineH;
   };
 
+  int glyphs = 0;
   while (*p && cy + kLineH <= max_y) {
+    if ((++glyphs & 15) == 0) wdtPet();
     if (*p == '\r') {
       p++;
       continue;
@@ -287,7 +290,9 @@ int fontDrawTextWrappedSmall(EpdSsd2683 &epd, int x, int y, int max_w, int max_y
     cy += kLineHSmall;
   };
 
+  int glyphs = 0;
   while (*p && cy + kLineHSmall <= max_y) {
+    if ((++glyphs & 15) == 0) wdtPet();
     if (*p == '\r') {
       p++;
       continue;

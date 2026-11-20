@@ -194,6 +194,14 @@ void setup() {
 
   fontBegin();
   errorLogBegin();
+  {
+    const esp_reset_reason_t rr = esp_reset_reason();
+    if (rr == ESP_RST_TASK_WDT || rr == ESP_RST_INT_WDT || rr == ESP_RST_WDT) {
+      errorLog("sys", "上次复位：看门狗（任务或 idle）。HTTPS/刷屏过久会这样，灯闪几下且墨水屏不更新。");
+    } else if (rr == ESP_RST_PANIC) {
+      errorLog("sys", "上次复位：Panic（常见于栈溢出）。");
+    }
+  }
 
   i2cBusRecover();
   digitalWrite(PIN_AUDIO_PWR, HIGH);

@@ -15,7 +15,7 @@ const APP_AUTHOR = pick('APP_AUTHOR', 'KyleBing')
 const DOC_VERSION = `v${APP_VERSION}`
 
 // GitHub Pages project site base
-const SITE_ROOT = process.env.GITHUB_ACTIONS ? '/zectrix-note4c-display' : ''
+const SITE_ROOT = process.env.GITHUB_ACTIONS ? '/zectrix-note4c-carte' : ''
 const base = SITE_ROOT ? `${SITE_ROOT}/` : '/'
 
 export default defineConfig({
@@ -57,7 +57,7 @@ export default defineConfig({
     logo: '/assets/favicon.svg',
     siteTitle: 'Carte',
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/KyleBing/zectrix-note4c-display' },
+      { icon: 'github', link: 'https://github.com/KyleBing/zectrix-note4c-carte' },
     ],
     search: { provider: 'local' },
     footer: {
@@ -73,7 +73,7 @@ export default defineConfig({
           { text: '行为机制', link: '/features/behavior' },
           {
             text: '下载最新固件',
-            link: 'https://github.com/KyleBing/zectrix-note4c-display/releases',
+            link: 'https://github.com/KyleBing/zectrix-note4c-carte/releases',
           },
         ],
       },
@@ -83,7 +83,7 @@ export default defineConfig({
         items: [
           {
             text: 'Releases',
-            link: 'https://github.com/KyleBing/zectrix-note4c-display/releases',
+            link: 'https://github.com/KyleBing/zectrix-note4c-carte/releases',
           },
         ],
       },
@@ -105,7 +105,7 @@ export default defineConfig({
       },
     ],
     editLink: {
-      pattern: 'https://github.com/KyleBing/zectrix-note4c-display/edit/main/docs/:path',
+      pattern: 'https://github.com/KyleBing/zectrix-note4c-carte/edit/main/docs/:path',
       text: '在 GitHub 上编辑此页',
     },
   },

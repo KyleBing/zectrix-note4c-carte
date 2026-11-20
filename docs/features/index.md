@@ -41,7 +41,7 @@
 
 ### LED（空闲关闭）
 
-设备 Web 导航 **LED**（`/led`）有完整示意动画说明。摘要：
+设备 Web 导航 **帮助**（`/help`）有完整 LED 示意动画说明。摘要：
 
 | 图案 | 含义 |
 | --- | --- |
@@ -62,7 +62,7 @@
 | --- | --- |
 | `/` | 状态：模式、IP、Token、Diary、天气、错误条数 |
 | `/settings` | App 开关、电源 / 日历时间 |
-| `/led` | LED 图案说明 |
+| `/help` | 帮助（含 LED 图案说明） |
 | `/wifi` | 编辑最多 5 条 WiFi，选 Active |
 | `/auth` | Portal Base URL、邮箱登录、Diary ID |
 | `/todo` | 在线预览拉取到的日记正文 |
@@ -72,7 +72,7 @@
 
 默认 Portal Base URL：`https://kylebing.cn/portal`。
 
-和风 JWT/Key 在 **portal-go** 服务端；设备用已登录 Token 调 `/portal/weather/now|hourly|daily|geo`。
+和风 JWT/Key 在 **portal-go** 服务端；设备用已登录 Token 打和风官方路径 `/portal/v7/weather/now|24h|7d`、`/portal/geo/v2/city/lookup`。
 
 ---
 

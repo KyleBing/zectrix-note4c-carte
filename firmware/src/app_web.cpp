@@ -24,7 +24,7 @@ static bool g_running = false;
 static bool g_ap = false;
 static char g_url[40] = "";
 
-enum class NavTab : uint8_t { Status, Settings, Led, Wifi, Auth, Todo, Weather, Album, Errors };
+enum class NavTab : uint8_t { Status, Settings, Help, Wifi, Auth, Todo, Weather, Album, Errors };
 
 static const char *kCss = R"CSS(
 *{box-sizing:border-box}
@@ -33,10 +33,12 @@ header{background:#111;color:#fff;padding:10px 14px;display:flex;align-items:cen
 header .brand{display:flex;align-items:center;gap:8px;flex-shrink:0}
 header .site-logo{width:28px;height:28px;object-fit:contain;flex-shrink:0;display:block}
 header h1{font-size:16px;margin:0;font-weight:650;letter-spacing:.02em;white-space:nowrap}
-header nav{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0}
+header nav{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0;flex:1;min-width:0}
 header nav a{display:inline-block;padding:5px 12px;border-radius:999px;font-size:13px;line-height:1.2;color:rgba(255,255,255,.55);text-decoration:none;border:1px solid transparent;background:transparent;transition:background .15s,color .15s,border-color .15s}
 header nav a:hover{color:#fff;background:rgba(255,255,255,.08)}
 header nav a.active{background:#ffcc00;color:#111;border-color:#ffcc00;font-weight:650}
+header .gh{margin-left:auto;display:flex;align-items:center;color:rgba(255,255,255,.7);flex-shrink:0}
+header .gh:hover{color:#fff}
 main{max-width:720px;margin:16px auto;padding:0 16px 28px}
 section{display:block;background:#fff;border-radius:12px;padding:18px 16px;margin-bottom:14px;box-shadow:0 1px 2px rgba(0,0,0,.05)}
 h2{font-size:15px;margin:0 0 14px;font-weight:650}
@@ -157,6 +159,8 @@ body.page-album main{max-width:none;width:100%;margin:0;padding:0;display:block}
 .ed-album{padding:14px 12px 24px;background:#f0eee8;flex:0 0 auto}
 .ed-album-h{display:flex;align-items:baseline;gap:10px;margin-bottom:10px;flex-wrap:wrap}
 .ed-album-h h2{margin:0;font-size:14px}
+.ed-album .check-row{border-radius:0;margin:0 0 8px;max-width:420px}
+.ed-album .hdr-hint{margin:0 0 14px;font-size:12px;color:#6b6b6b;max-width:420px}
 .ed-saved{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;overflow:visible;padding-bottom:4px}
 .thumb{border:1px solid #ccc;padding:6px;background:#fff;width:auto;min-width:0;box-sizing:border-box}
 .thumb.on{border-color:#111;outline:1px solid #111}
@@ -296,14 +300,18 @@ static void sendHtml(NavTab active, const String &body) {
             "<h1>Carte</h1></div><nav>");
   appendNavLink(page, NavTab::Status, active, "/", "状态");
   appendNavLink(page, NavTab::Settings, active, "/settings", "设置");
-  appendNavLink(page, NavTab::Led, active, "/led", "LED");
   appendNavLink(page, NavTab::Wifi, active, "/wifi", "WiFi");
   appendNavLink(page, NavTab::Auth, active, "/auth", "鉴权");
   appendNavLink(page, NavTab::Todo, active, "/todo", "待办");
   appendNavLink(page, NavTab::Weather, active, "/weather", "天气");
   appendNavLink(page, NavTab::Album, active, "/album", "相册");
   appendNavLink(page, NavTab::Errors, active, "/errors", "错误");
-  page += F("</nav></header><main>");
+  appendNavLink(page, NavTab::Help, active, "/help", "帮助");
+  page += F("</nav>"
+            "<a class=gh href='https://github.com/KyleBing/zectrix-note4c-carte' target=_blank rel=noopener title=GitHub aria-label=GitHub>"
+            "<svg viewBox='0 0 16 16' width=22 height=22 fill=currentColor aria-hidden=true>"
+            "<path d='M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z'/>"
+            "</svg></a></header><main>");
   page += body;
   page += F("</main></body></html>");
   g_server.send(200, "text/html; charset=utf-8", page);
@@ -865,8 +873,9 @@ static void appendWeatherForm(String &b, const AppConfig &cfg, const WeatherGeoR
                               const char *flash_html) {
   if (flash_html && flash_html[0]) b += flash_html;
   b += F("<section><h2>天气位置</h2>");
-  b += F("<p class=hint>设备经 <strong>Portal</strong> 拉天气（<code>/weather/*</code>），"
-         "和风 JWT/Key 在服务器配置。请先在「鉴权」登录，再用下方搜索选位置。</p>");
+  b += F("<p class=hint>设备经 <strong>Portal</strong> 拉天气（和风官方路径 "
+         "<code>/v7/weather/now|24h|7d</code>、<code>/geo/v2/city/lookup</code>），"
+         "和风 JWT/Key 在服务器。请先在「鉴权」登录，再用下方搜索选位置。</p>");
   b += F("<form method=POST action=/weather>");
   b += F("<label class='check-row");
   if (cfg.qweather_enabled) b += F(" on");
@@ -883,7 +892,7 @@ static void appendWeatherForm(String &b, const AppConfig &cfg, const WeatherGeoR
   b += F("</form></section>");
 
   b += F("<section><h2>搜索位置</h2>");
-  b += F("<p class=hint>经 Portal <code>/weather/geo</code> 调和风城市搜索；需 STA + 已登录。</p>");
+  b += F("<p class=hint>经 Portal <code>/geo/v2/city/lookup</code> 调和风城市搜索；需 STA + 已登录。</p>");
   b += F("<form method=POST action=/weather>");
   b += F("<label>城市 / 区县名</label><input name=geo_query placeholder=\"例如 杭州 或 西湖\">");
   b += F("<div class=btn-row><button type=submit name=action value=search>搜索</button></div>");
@@ -1006,8 +1015,12 @@ static void handleFavicon() {
   f.close();
 }
 
-static void handleLedGet() {
+static void handleHelpGet() {
   String b;
+  b += F("<section><h2>帮助</h2>"
+         "<p class=hint style=margin:0>按键、电源与状态灯含义。长按上键约 1.5s 开配置网页；"
+         "长按下键约 3s 关机（深睡，再按下键唤醒）。</p></section>");
+
   b += F("<section><h2>LED 含义</h2>"
          "<p class=hint>板载状态灯（GPIO3，低电平点亮）。空闲默认熄灭；"
          "任意按键按下会强制常亮，松开后恢复下方图案。左侧圆点为示意动画。</p>"
@@ -1039,7 +1052,12 @@ static void handleLedGet() {
   b += F("<section><h2>怎么记</h2>"
          "<p class=hint style=margin:0>按下有灯 → 松开看图案。"
          "慢闪在联网，呼吸在刷屏，三短闪是出错，上电三闪表示已开机。</p></section>");
-  sendHtml(NavTab::Led, b);
+  sendHtml(NavTab::Help, b);
+}
+
+static void handleLedRedirect() {
+  g_server.sendHeader("Location", "/help");
+  g_server.send(302);
 }
 
 static void handleErrorsGet() {
@@ -1072,7 +1090,8 @@ static void handleErrorsClear() {
 static void registerRoutes() {
   g_server.on("/", HTTP_GET, handleRoot);
   g_server.on("/settings", HTTP_GET, handleSettingsGet);
-  g_server.on("/led", HTTP_GET, handleLedGet);
+  g_server.on("/help", HTTP_GET, handleHelpGet);
+  g_server.on("/led", HTTP_GET, handleLedRedirect);
   g_server.on("/apps", HTTP_POST, handleAppsPost);
   g_server.on("/power", HTTP_POST, handlePowerPost);
   g_server.on("/time", HTTP_POST, handleTimePost);

@@ -6,6 +6,7 @@
 #include <ctime>
 
 #include "app_rtc.h"
+#include "app_power.h"
 
 static constexpr const char *kPath = "/logs/errors.json";
 static constexpr const char *kDir = "/logs";
@@ -56,6 +57,7 @@ static bool saveToFs() {
   JsonArray arr = doc["entries"].to<JsonArray>();
   // oldest → newest for file readability
   for (int i = g_count - 1; i >= 0; i--) {
+    wdtPet();
     ErrorLogEntry e;
     if (!errorLogGet(i, e)) continue;
     JsonObject o = arr.add<JsonObject>();

@@ -52,7 +52,7 @@ void webAlbumAppendPage(String &b) {
       "</div>"
       "<div class=ed-body>"
          "<div class=ed-pair>"
-         "<div class=ed-stage>"
+         "<div class=ed-stage id=srcStage>"
          "<div class=ed-fit>"
          "<canvas id=src class=ed-can width=400 height=300></canvas>"
          "<canvas id=loupe width=96 height=96></canvas>"
@@ -110,7 +110,7 @@ void webAlbumAppendPage(String &b) {
       "<div class=ed-row><span>容差</span><input type=range id=tol min=8 max=120 value=36><em id=tolV>36</em></div>"
       "<div id=rules class=rules></div>"
       "</div>"
-      "<p class=hint ed-help>先点目标色再点原图取样。画笔/橡皮改四色成品。预览色点可过滤。</p>"
+      "<p class=hint ed-help>滑条缩放 · 空格+拖动平移（同 PS）。先点目标色再点原图取样。画笔/橡皮改四色成品。</p>"
       "</aside>"
       "</div></div>"
       "<div id=toast class=ed-toast></div>"
@@ -120,10 +120,11 @@ void webAlbumAppendPage(String &b) {
       "<p class=hint style=margin:0>最多 ");
   b += String(ALBUM_MAX);
   b += F(" 张 · 取消展示后设备不翻到该图</p>"
-         "<label class=show-lab><input type=checkbox id=showHeader");
-  if (getAppConfig().album_show_header) b += F(" checked");
-  b += F(">设备显示标题栏</label>"
          "</div>"
+         "<label class=check-row><input type=checkbox id=showHeader");
+  if (getAppConfig().album_show_header) b += F(" checked");
+  b += F("><span>设备显示标题栏</span></label>"
+         "<p class=hdr-hint>墨水屏相册页顶部是否叠「相册」标题条；关掉可多露出一点画面。</p>"
          "<div id=list class=ed-saved>加载中…</div>"
          "</div></div>");
 
@@ -137,6 +138,22 @@ let img=null,packed=null,rules=[],mapTo=0,cover=true,tool='pan';
 let drag=false,lx=0,ly=0,tmr=null,adjRgb=null,rawLum=null;
 let baseIdx=null,paint=new Int8Array(W*H);
 let blk=0,mid=128,wht=255,histDrag=-1,editName='',brushCol=0,loupeRight=false,visCol=-1;
+let spaceHeld=false,pvDrag=false,pvx=0,pvy=0;
+function typingTarget(el){
+  if(!el) return false;
+  const t=el.tagName;
+  return t==='INPUT'||t==='TEXTAREA'||t==='SELECT'||el.isContentEditable;
+}
+function canPanSrc(){return spaceHeld||tool==='pan';}
+function syncCursor(){
+  const src=$('src'),pv=$('preview');
+  if(canPanSrc()) src.style.cursor=drag?'grabbing':'grab';
+  else if(tool==='pick') src.style.cursor='crosshair';
+  else src.style.cursor='default';
+  if(spaceHeld&&val('pvzoom')>100) pv.style.cursor=pvDrag?'grabbing':'grab';
+  else if(tool==='erase'||tool==='brush') pv.style.cursor='none';
+  else pv.style.cursor='default';
+}
 function nearest(r,g,b){
   let bi=0,bd=1e18;
   for(let i=0;i<4;i++){
@@ -205,10 +222,9 @@ function setTool(t){
   $('btnPick').classList.toggle('on',t==='pick');
   $('btnBrush').classList.toggle('on',t==='brush');
   $('brushLab').textContent=t==='erase'?'橡皮':'笔触';
-  $('src').style.cursor=t==='pick'?'crosshair':(t==='pan'?'grab':'default');
-  $('preview').style.cursor=(t==='erase'||t==='brush')?'none':'default';
   if(t!=='pick') $('loupe').style.display='none';
   if(t!=='erase'&&t!=='brush') clearCursor();
+  syncCursor();
 }
 function setBrushCol(n){
   brushCol=n;
@@ -490,51 +506,71 @@ const srcCv=$('src');
 srcCv.onpointerdown=function(e){
   srcCv.setPointerCapture(e.pointerId);
   const xy=canvasXY(srcCv,e);
+  if(canPanSrc()){
+    if(!img) return;
+    drag=true;lx=e.clientX;ly=e.clientY;syncCursor();return;
+  }
   if(tool==='pick'){
     if(!adjRgb) return;
     const j=(xy[1]*W+xy[0])*3;
     rules.push({r:adjRgb[j],g:adjRgb[j+1],b:adjRgb[j+2],tol:val('tol'),to:mapTo});
     renderRules();schedule(true);return;
   }
-  if(tool!=='pan') return;
-  drag=true;lx=e.clientX;ly=e.clientY;
 };
 srcCv.onpointermove=function(e){
   const xy=canvasXY(srcCv,e);
-  if(tool==='pick'){placeLoupe(xy[2],xy[3]);drawLoupe(xy[0],xy[1]);return;}
-  if(!drag||!img||tool!=='pan') return;
+  if(tool==='pick'&&!canPanSrc()){placeLoupe(xy[2],xy[3]);drawLoupe(xy[0],xy[1]);return;}
+  if(!drag||!img||!canPanSrc()) return;
   const r=srcCv.getBoundingClientRect();
   $('panx').value=val('panx')+(e.clientX-lx)*W/r.width;
   $('pany').value=val('pany')+(e.clientY-ly)*H/r.height;
   lx=e.clientX;ly=e.clientY;schedule(false);
 };
-srcCv.onpointerup=function(){if(drag){drag=false;schedule(true);}};
-srcCv.onpointercancel=function(){drag=false;};
-srcCv.onpointerleave=function(){if(tool==='pick') $('loupe').style.display='none';};
+srcCv.onpointerup=function(){if(drag){drag=false;syncCursor();schedule(true);}};
+srcCv.onpointercancel=function(){drag=false;syncCursor();};
+srcCv.onpointerleave=function(){if(tool==='pick'&&!spaceHeld) $('loupe').style.display='none';};
 const pvCv=$('preview');
+const pvBox=$('pvInner').parentElement;
 function paintAt(e){
   const xy=canvasXY(pvCv,e);
   stampPaint(xy[0],xy[1],val('brush'),tool==='erase'?1:brushCol);
   refreshFinal();
 }
 pvCv.onpointerdown=function(e){
+  if(spaceHeld&&val('pvzoom')>100){
+    pvCv.setPointerCapture(e.pointerId);
+    pvDrag=true;pvx=e.clientX;pvy=e.clientY;syncCursor();return;
+  }
   if(tool!=='erase'&&tool!=='brush') return;
   pvCv.setPointerCapture(e.pointerId);drag=true;paintAt(e);
 };
 pvCv.onpointermove=function(e){
+  if(pvDrag){
+    pvBox.scrollLeft-=(e.clientX-pvx);
+    pvBox.scrollTop-=(e.clientY-pvy);
+    pvx=e.clientX;pvy=e.clientY;return;
+  }
   const xy=canvasXY(pvCv,e);
   if(tool==='erase'||tool==='brush') drawBrushCursor(xy[0],xy[1]);
   if(drag&&(tool==='erase'||tool==='brush')) paintAt(e);
 };
-pvCv.onpointerup=function(){drag=false;};
-pvCv.onpointercancel=function(){drag=false;};
+pvCv.onpointerup=function(){pvDrag=false;drag=false;syncCursor();};
+pvCv.onpointercancel=function(){pvDrag=false;drag=false;syncCursor();};
 pvCv.onpointerleave=function(){clearCursor();};
-$('pvStage').addEventListener('wheel',function(e){
+window.addEventListener('keydown',function(e){
+  if(e.code!=='Space'&&e.key!==' ') return;
+  if(typingTarget(e.target)) return;
   e.preventDefault();
-  const z=$('pvzoom');
-  z.value=Math.max(100,Math.min(800,+z.value+(e.deltaY<0?25:-25)));
-  setEm(e.clientX,e.clientY);
-},{passive:false});
+  if(!spaceHeld){spaceHeld=true;syncCursor();}
+});
+window.addEventListener('keyup',function(e){
+  if(e.code!=='Space'&&e.key!==' ') return;
+  spaceHeld=false;
+  if(drag){drag=false;schedule(true);}
+  pvDrag=false;
+  syncCursor();
+});
+window.addEventListener('blur',function(){spaceHeld=false;pvDrag=false;syncCursor();});
 function histX(e){
   const r=$('hist').getBoundingClientRect();
   return Math.max(0,Math.min(255,Math.round((e.clientX-r.left)*255/r.width)));

@@ -61,6 +61,7 @@ void EpdSsd2683::waitBusy(uint32_t timeout_ms) {
     }
     powerPoll(false);  // power-off only; do not latch DOWN shorts during refresh
     ledUpdate();
+    wdtPet();
     delay(20);
   }
 }
@@ -261,6 +262,7 @@ bool EpdSsd2683::display() {
   powerIdleTouch();
   Serial.println("[EPD] full refresh start (may take 10s+)");
   const uint32_t t0 = millis();
+  WdtLongOpGuard wdt;  // 四色全刷常 > loop TWDT（约 5s）
 
   powerOn();
   hwReset();
@@ -270,7 +272,10 @@ bool EpdSsd2683::display() {
   waitBusy();
   for (int y = 0; y < kHeight; y++) {
     writeBytes(fb_ + y * kBytesPerRow, kBytesPerRow);
-    if ((y & 15) == 15) delay(1);
+    if ((y & 15) == 15) {
+      wdtPet();
+      delay(1);
+    }
   }
   turnOnDisplay();
 

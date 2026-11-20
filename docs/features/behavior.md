@@ -122,7 +122,7 @@ Web **设置**可关闭部分 App（至少保留一个）。
 | --- | --- |
 | `/` | 状态总览（含错误条数入口） |
 | `/settings` | App 开关、空闲关机、日历/时间 |
-| `/led` | LED 图案说明（动画） |
+| `/help` | 帮助（含 LED 图案说明；旧 `/led` 跳转至此） |
 | `/wifi` | 最多 5 组 WiFi |
 | `/auth` | Portal 地址、登录、Diary ID |
 | `/todo` | 预览待办正文 |
@@ -154,9 +154,9 @@ Token：登录写入 NVS；若响应带 `X-Access-Token` 且剩余有效期短�
 
 | 模式 | 请求 |
 | --- | --- |
-| NOW | `/weather/now` |
-| 12H | `/weather/hourly`（接口 24h，屏上取前 12） |
-| 7D / 14D | `/weather/daily`（14D 用 15d 再截断） |
+| NOW | `/v7/weather/now` |
+| 12H | `/v7/weather/24h`（屏上取前 12） |
+| 7D / 14D | `/v7/weather/7d` / `/v7/weather/15d`（14D 截断） |
 
 响应形态：`{ success, message, data }`，`data` 为和风 v7 结构（`code` / `now` / `hourly` / `daily`）。解析失败或业务失败时，屏上出错误详情，并写入错误日志。
 
@@ -199,7 +199,7 @@ Token：登录写入 NVS；若响应带 `X-Access-Token` 且剩余有效期短�
 
 ## 8. LED 语义（摘要）
 
-完整动画说明在设备 Web `/led`。
+完整动画说明在设备 Web `/help`。
 
 | 图案 | 含义 |
 | --- | --- |
@@ -232,12 +232,14 @@ Token：登录写入 NVS；若响应带 `X-Access-Token` 且剩余有效期短�
 松手 → 等 ~500ms 连击窗
   → LED 呼吸
   → 推进 weather mode 并先 saveUiSession
-  → WiFi（必要时）→ HTTPS GET Portal
+  → WiFi（必要时）→ HTTPS GET Portal（此段关闭 loop 看门狗，读流时仍喂灯）
   → 解析 JSON → 画屏（成功内容或「错误详情」）
   → 失败则 errorLog(...)
   → LED 灭（或硬失败三短闪）
   → 短时忽略按键，防止连触
 ```
+
+若灯快闪 3 下后屏完全不变、错误页也是空的：多半是拉数时看门狗/栈溢出把板子复位了（上电故意不刷墨水屏）。新固件会在 **/错误** 里留下「上次复位：看门狗 / Panic」。
 
 Web 退出类似，但 BOOT 立即处理，且会先纠正「当前 App 已被禁用」再刷屏。
 

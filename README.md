@@ -12,7 +12,7 @@
 | `docs/` | VitePress 文档站（独立 npm 工程） |
 | `design/` | 图标等设计源文件 |
 
-线上文档：[GitHub Pages](https://kylebing.github.io/zectrix-note4c-display/)
+线上文档：[GitHub Pages](https://kylebing.github.io/zectrix-note4c-carte/)
 
 ## 文档
 
@@ -69,4 +69,4 @@ git push origin v0.1.0
 
 ## 仓库
 
-https://github.com/KyleBing/zectrix-note4c-display
+https://github.com/KyleBing/zectrix-note4c-carte

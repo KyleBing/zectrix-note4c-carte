@@ -7,14 +7,61 @@
 #include "app_footer.h"
 #include "app_version.h"
 #include "app_errorlog.h"
+#include "app_power.h"
+#include "app_led.h"
 
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 
 static const char *kRenewHeader = "X-Access-Token";
+static constexpr size_t kWeatherJsonCap = 48 * 1024;
+
+// 预报结构体含大量 String，放静态区，避免和 WiFiClientSecure 叠在 loop 栈上撑爆复位。
+static WeatherNowData g_now_buf;
+static WeatherHourlyData g_hourly_buf;
+static WeatherDailyData g_daily_buf;
+
+static void weatherPump() {
+  powerPoll(false);
+  ledUpdate();
+}
+
+// HTTPS 读 body 时喂灯/看门狗，并截断过大 JSON，避免任务看门狗把板子复位（灯闪几下、屏不更新）。
+class WeatherBodyStream : public Stream {
+ public:
+  WeatherBodyStream(Stream &inner, size_t cap) : inner_(inner), cap_(cap) {}
+  int available() override { return inner_.available(); }
+  int peek() override { return inner_.peek(); }
+  void flush() override { inner_.flush(); }
+  size_t write(uint8_t) override { return 0; }
+  int read() override {
+    if (n_ >= cap_) {
+      truncated_ = true;
+      return -1;
+    }
+    const int c = inner_.read();
+    if (c >= 0) n_++;
+    const uint32_t now = millis();
+    if (now - last_pump_ >= 200) {
+      last_pump_ = now;
+      weatherPump();
+    }
+    return c;
+  }
+  bool truncated() const { return truncated_; }
+  size_t bytes() const { return n_; }
+
+ private:
+  Stream &inner_;
+  size_t cap_;
+  size_t n_ = 0;
+  uint32_t last_pump_ = 0;
+  bool truncated_ = false;
+};
 
 static String joinUrl(const char *base, const char *path) {
   String b = base ? base : "";
@@ -56,6 +103,22 @@ static bool qweatherCodeOk(JsonVariantConst code, String &got) {
   return got == "200";
 }
 
+static JsonObject weatherDataObj(JsonDocument &doc) {
+  JsonObject data = doc["data"].as<JsonObject>();
+  if (!data.isNull()) return data;
+  return doc.as<JsonObject>();
+}
+
+static void filterPortalMeta(JsonDocument &filter) {
+  filter["success"] = true;
+  filter["ok"] = true;
+  filter["message"] = true;
+  filter["msg"] = true;
+  filter["error"] = true;
+  filter["code"] = true;
+  filter["data"]["code"] = true;
+}
+
 static bool ensureWifi(String &err) {
   if (wifiIsStaConnected()) return true;
   if (!hasSavedWifiConfig()) {
@@ -84,51 +147,94 @@ static bool portalWeatherGet(const char *path_and_query, JsonDocument &doc, Stri
   }
 
   const String url = joinUrl(cfg.portal_base_url, path_and_query);
-  Serial.printf("[Weather] GET %s\n", path_and_query);
-  WiFiClientSecure client;
-  client.setInsecure();
-  client.setTimeout(15000);
+  Serial.printf("[Weather] GET %s heap=%u\n", path_and_query, (unsigned)ESP.getFreeHeap());
+
+  std::unique_ptr<WiFiClientSecure> client(new WiFiClientSecure());
+  if (!client) {
+    err = "client alloc failed";
+    return false;
+  }
+  client->setInsecure();
+  client->setTimeout(12000);
+  client->setHandshakeTimeout(12);
   HTTPClient http;
-  if (!http.begin(client, url)) {
+  if (!http.begin(*client, url)) {
     err = "http begin failed";
     return false;
   }
-  http.setTimeout(20000);
+  http.setTimeout(15000);
+  http.setConnectTimeout(8000);
+  http.useHTTP10(true);
   http.addHeader("Authorization", String("Bearer ") + cfg.portal_token);
   http.addHeader("Accept-Encoding", "identity");
   const char *headerKeys[] = {kRenewHeader};
   http.collectHeaders(headerKeys, 1);
 
-  const int code = http.GET();
-  if (code <= 0) {
-    http.end();
-    err = String("HTTP ") + code + " " + path_and_query;
-    return false;
-  }
-  if (code == 401) {
+  DeserializationError jerr = DeserializationError::Ok;
+  int code = 0;
+  int size = -1;
+  bool truncated = false;
+  size_t got = 0;
+  {
+    WdtLongOpGuard wdt_off;  // TLS busy-spin 会饿死本核 idle WDT；仅关 loop WDT 不够
+    code = http.GET();
+    if (code <= 0) {
+      http.end();
+      err = String("HTTP ") + code + " " + path_and_query;
+      return false;
+    }
+    if (code == 401) {
+      captureRenewedToken(http);
+      http.end();
+      err = String("401 未授权 ") + path_and_query + " — 请在 Web /auth 重新登录";
+      return false;
+    }
+    if (code < 200 || code >= 300) {
+      http.end();
+      err = String("HTTP ") + code + " " + path_and_query;
+      if (code == 404) err += "（Portal 无此路由，确认已部署天气 hourly）";
+      Serial.printf("[Weather] %s\n", err.c_str());
+      return false;
+    }
+    size = http.getSize();
+    Serial.printf("[Weather] HTTP %d size=%d\n", code, size);
+    if (size > (int)kWeatherJsonCap) {
+      http.end();
+      err = String("payload too large size=") + size + " " + path_and_query;
+      return false;
+    }
+    WeatherBodyStream body(http.getStream(), kWeatherJsonCap);
+    jerr = filter ? deserializeJson(doc, body, DeserializationOption::Filter(*filter))
+                  : deserializeJson(doc, body);
+    truncated = body.truncated();
+    got = body.bytes();
     captureRenewedToken(http);
     http.end();
-    err = String("401 未授权 ") + path_and_query + " — 请在 Web /auth 重新登录";
-    return false;
   }
 
-  const int size = http.getSize();
-  Serial.printf("[Weather] HTTP %d size=%d\n", code, size);
-  DeserializationError jerr =
-      filter ? deserializeJson(doc, http.getStream(), DeserializationOption::Filter(*filter))
-             : deserializeJson(doc, http.getStream());
-  captureRenewedToken(http);
-  http.end();
-
-  if (jerr) {
-    err = String("JSON ") + jerr.c_str() + " size=" + size + " " + path_and_query;
+  if (truncated) {
+    err = String("JSON truncated >") + (int)kWeatherJsonCap + " " + path_and_query;
     Serial.printf("[Weather] %s\n", err.c_str());
     return false;
   }
-  if (!(doc["success"] | false)) {
-    const char *m = doc["message"] | "portal weather failed";
-    err = String(m) + " | " + path_and_query;
-    Serial.printf("[Weather] portal fail: %s\n", err.c_str());
+  if (jerr) {
+    err = String("JSON ") + jerr.c_str() + " size=" + size + " got=" + (int)got + " " + path_and_query;
+    Serial.printf("[Weather] %s\n", err.c_str());
+    return false;
+  }
+  const bool wrapped_ok = (doc["success"] | false) || (doc["ok"] | false);
+  String qcode;
+  const bool q_ok =
+      qweatherCodeOk(doc["data"]["code"], qcode) || qweatherCodeOk(doc["code"], qcode);
+  if (!wrapped_ok && !q_ok) {
+    String m = jsonField(doc["message"]);
+    if (!m.length()) m = jsonField(doc["msg"]);
+    if (!m.length()) m = jsonField(doc["error"]);
+    if (!m.length()) m = "portal weather failed";
+    err = m + " | " + path_and_query;
+    if (qcode.length()) err += String(" qcode=") + qcode;
+    err += String(" HTTP ") + code;
+    Serial.printf("[Weather] portal fail: %s heap=%u\n", err.c_str(), (unsigned)ESP.getFreeHeap());
     return false;
   }
   return true;
@@ -146,7 +252,7 @@ bool weatherGeoLookup(const char *query, WeatherGeoResult &out) {
     return false;
   }
 
-  String path = "/weather/geo?lang=zh&number=10&location=";
+  String path = "/geo/v2/city/lookup?lang=zh&number=10&range=cn&location=";
   for (const unsigned char *p = (const unsigned char *)query; *p; ++p) {
     const unsigned char c = *p;
     if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' ||
@@ -210,14 +316,33 @@ bool weatherFetchNow(WeatherNowData &out) {
 
   const AppConfig &cfg = getAppConfig();
   char path[80];
-  snprintf(path, sizeof(path), "/weather/now?location=%s", cfg.qweather_location_id);
+  snprintf(path, sizeof(path), "/v7/weather/now?location=%s&lang=zh", cfg.qweather_location_id);
+
+  JsonDocument filter;
+  filterPortalMeta(filter);
+  auto fillNow = [](JsonObject n0) {
+    n0["obsTime"] = true;
+    n0["temp"] = true;
+    n0["feelsLike"] = true;
+    n0["text"] = true;
+    n0["icon"] = true;
+    n0["windDir"] = true;
+    n0["windScale"] = true;
+    n0["humidity"] = true;
+    n0["precip"] = true;
+    n0["pressure"] = true;
+    n0["vis"] = true;
+    n0["cloud"] = true;
+  };
+  fillNow(filter["data"]["now"].to<JsonObject>());
+  fillNow(filter["now"].to<JsonObject>());
 
   JsonDocument doc;
-  if (!portalWeatherGet(path, doc, err)) {
+  if (!portalWeatherGet(path, doc, err, &filter)) {
     out.message = err;
     return false;
   }
-  JsonObject data = doc["data"].as<JsonObject>();
+  JsonObject data = weatherDataObj(doc);
   if (data.isNull()) {
     out.message = "no data";
     return false;
@@ -266,29 +391,30 @@ bool weatherFetchHourly(const char *hours_path, WeatherHourlyData &out) {
 
   const AppConfig &cfg = getAppConfig();
   char path[96];
-  snprintf(path, sizeof(path), "/weather/hourly?location=%s&hours=%s", cfg.qweather_location_id,
-           hours_path);
+  snprintf(path, sizeof(path), "/v7/weather/%s?location=%s&lang=zh", hours_path,
+           cfg.qweather_location_id);
 
   JsonDocument filter;
-  filter["success"] = true;
-  filter["message"] = true;
-  filter["data"]["code"] = true;
-  JsonObject h0 = filter["data"]["hourly"][0].to<JsonObject>();
-  h0["fxTime"] = true;
-  h0["temp"] = true;
-  h0["text"] = true;
-  h0["windDir"] = true;
-  h0["windScale"] = true;
-  h0["humidity"] = true;
-  h0["precip"] = true;
-  h0["pop"] = true;
+  filterPortalMeta(filter);
+  auto fillHour = [](JsonObject h0) {
+    h0["fxTime"] = true;
+    h0["temp"] = true;
+    h0["text"] = true;
+    h0["windDir"] = true;
+    h0["windScale"] = true;
+    h0["humidity"] = true;
+    h0["precip"] = true;
+    h0["pop"] = true;
+  };
+  fillHour(filter["data"]["hourly"][0].to<JsonObject>());
+  fillHour(filter["hourly"][0].to<JsonObject>());
 
   JsonDocument doc;
   if (!portalWeatherGet(path, doc, err, &filter)) {
     out.message = err;
     return false;
   }
-  JsonObject data = doc["data"].as<JsonObject>();
+  JsonObject data = weatherDataObj(doc);
   if (data.isNull()) {
     out.message = "no data";
     return false;
@@ -338,30 +464,32 @@ bool weatherFetchDaily(const char *days_path, WeatherDailyData &out) {
 
   const AppConfig &cfg = getAppConfig();
   char path[96];
-  snprintf(path, sizeof(path), "/weather/daily?location=%s&days=%s", cfg.qweather_location_id, days_path);
+  snprintf(path, sizeof(path), "/v7/weather/%s?location=%s&lang=zh", days_path,
+           cfg.qweather_location_id);
 
   JsonDocument filter;
-  filter["success"] = true;
-  filter["message"] = true;
-  filter["data"]["code"] = true;
-  JsonObject d0 = filter["data"]["daily"][0].to<JsonObject>();
-  d0["fxDate"] = true;
-  d0["tempMax"] = true;
-  d0["tempMin"] = true;
-  d0["textDay"] = true;
-  d0["textNight"] = true;
-  d0["windDirDay"] = true;
-  d0["windScaleDay"] = true;
-  d0["humidity"] = true;
-  d0["precip"] = true;
-  d0["uvIndex"] = true;
+  filterPortalMeta(filter);
+  auto fillDay = [](JsonObject d0) {
+    d0["fxDate"] = true;
+    d0["tempMax"] = true;
+    d0["tempMin"] = true;
+    d0["textDay"] = true;
+    d0["textNight"] = true;
+    d0["windDirDay"] = true;
+    d0["windScaleDay"] = true;
+    d0["humidity"] = true;
+    d0["precip"] = true;
+    d0["uvIndex"] = true;
+  };
+  fillDay(filter["data"]["daily"][0].to<JsonObject>());
+  fillDay(filter["daily"][0].to<JsonObject>());
 
   JsonDocument doc;
   if (!portalWeatherGet(path, doc, err, &filter)) {
     out.message = err;
     return false;
   }
-  JsonObject data = doc["data"].as<JsonObject>();
+  JsonObject data = weatherDataObj(doc);
   if (data.isNull()) {
     out.message = "no data";
     return false;
@@ -629,6 +757,7 @@ void weatherDrawForecast(EpdSsd2683 &epd, const WeatherDailyData &d, WeatherMode
 }
 
 bool weatherShowMode(EpdSsd2683 &epd, WeatherMode mode) {
+  WdtLongOpGuard wdt;  // fetch + 记日志 + 排版，直到 epd.display 自己再套一层
   if (!epd.ok()) {
     errorLog("weather", "EPD not ready");
     return false;
@@ -643,32 +772,28 @@ bool weatherShowMode(EpdSsd2683 &epd, WeatherMode mode) {
 
   switch (mode) {
     case WeatherMode::Now: {
-      WeatherNowData d;
-      const bool ok = weatherFetchNow(d);
-      if (!ok) errorLog("weather", d.message.length() ? d.message : "now fetch failed");
-      weatherDrawNow(epd, d, ok ? "OK" : "err");
+      const bool ok = weatherFetchNow(g_now_buf);
+      if (!ok) errorLog("weather", g_now_buf.message.length() ? g_now_buf.message : "now fetch failed");
+      weatherDrawNow(epd, g_now_buf, ok ? "OK" : "err");
       return true;
     }
     case WeatherMode::Hour12: {
-      WeatherHourlyData d;
-      const bool ok = weatherFetchHourly("24h", d);  // API min 24h; UI shows first 12
-      if (!ok) errorLog("weather", d.message.length() ? d.message : "hourly fetch failed");
-      weatherDrawHourly(epd, d, ok ? "OK" : "err");
+      const bool ok = weatherFetchHourly("24h", g_hourly_buf);  // API min 24h; UI shows first 12
+      if (!ok) errorLog("weather", g_hourly_buf.message.length() ? g_hourly_buf.message : "hourly fetch failed");
+      weatherDrawHourly(epd, g_hourly_buf, ok ? "OK" : "err");
       return true;
     }
     case WeatherMode::Week7: {
-      WeatherDailyData d;
-      const bool ok = weatherFetchDaily("7d", d);
-      if (!ok) errorLog("weather", d.message.length() ? d.message : "daily 7d failed");
-      weatherDrawForecast(epd, d, mode, ok ? "OK" : "err");
+      const bool ok = weatherFetchDaily("7d", g_daily_buf);
+      if (!ok) errorLog("weather", g_daily_buf.message.length() ? g_daily_buf.message : "daily 7d failed");
+      weatherDrawForecast(epd, g_daily_buf, mode, ok ? "OK" : "err");
       return true;
     }
     case WeatherMode::Week14: {
-      WeatherDailyData d;
-      const bool ok = weatherFetchDaily("15d", d);
-      if (ok && d.count > 14) d.count = 14;  // show 14 days
-      if (!ok) errorLog("weather", d.message.length() ? d.message : "daily 14d failed");
-      weatherDrawForecast(epd, d, mode, ok ? "OK" : "err");
+      const bool ok = weatherFetchDaily("15d", g_daily_buf);
+      if (ok && g_daily_buf.count > 14) g_daily_buf.count = 14;  // show 14 days
+      if (!ok) errorLog("weather", g_daily_buf.message.length() ? g_daily_buf.message : "daily 14d failed");
+      weatherDrawForecast(epd, g_daily_buf, mode, ok ? "OK" : "err");
       return true;
     }
     default:

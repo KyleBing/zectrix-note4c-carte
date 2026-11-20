@@ -20,7 +20,7 @@ hero:
       link: /hardware/note4c
     - theme: alt
       text: GitHub
-      link: https://github.com/KyleBing/zectrix-note4c-display
+      link: https://github.com/KyleBing/zectrix-note4c-carte
 
 features:
   - title: 多 App + Web 配网

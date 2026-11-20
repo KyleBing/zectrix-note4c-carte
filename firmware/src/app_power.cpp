@@ -3,7 +3,51 @@
 #include "app_led.h"
 
 #include <esp_sleep.h>
+#include <esp_task_wdt.h>
 #include "driver/rtc_io.h"
+
+extern bool loopTaskWDTEnabled;
+
+static int g_wdt_long_op = 0;
+static bool g_wdt_had_loop = false;
+static bool g_wdt_had_idle0 = false;
+static bool g_wdt_had_idle1 = false;
+
+static bool idleWatched(int core) {
+  TaskHandle_t idle = xTaskGetIdleTaskHandleForCPU(core);
+  return idle && esp_task_wdt_status(idle) == ESP_OK;
+}
+
+void wdtPet() {
+  yield();
+  if (g_wdt_long_op == 0 && loopTaskWDTEnabled) {
+    esp_task_wdt_reset();
+  }
+}
+
+void wdtLongOpBegin() {
+  if (g_wdt_long_op++ > 0) return;
+  // Arduino 默认不盯 loop 任务，只盯 CPU0 idle。结束时绝不能 enableLoopWDT /
+  // enableCore1WDT，否则会把本来没订阅的任务加进 TWDT，刷屏 10s 必复位。
+  g_wdt_had_loop = loopTaskWDTEnabled;
+  if (g_wdt_had_loop) disableLoopWDT();
+  g_wdt_had_idle0 = idleWatched(0);
+  if (g_wdt_had_idle0) disableCore0WDT();
+#ifndef CONFIG_FREERTOS_UNICORE
+  g_wdt_had_idle1 = idleWatched(1);
+  if (g_wdt_had_idle1) disableCore1WDT();
+#endif
+}
+
+void wdtLongOpEnd() {
+  if (g_wdt_long_op <= 0) return;
+  if (--g_wdt_long_op > 0) return;
+  if (g_wdt_had_idle0) enableCore0WDT();
+#ifndef CONFIG_FREERTOS_UNICORE
+  if (g_wdt_had_idle1) enableCore1WDT();
+#endif
+  if (g_wdt_had_loop) enableLoopWDT();
+}
 
 static uint32_t g_down_since = 0;
 static bool g_down_long_done = false;
@@ -55,6 +99,8 @@ uint8_t powerTakeDownBurst() {
 void powerClearDownClicks() { g_down_clicks = 0; }
 
 void powerBegin() {
+  // 默认 5s；HTTPS / 四色全刷经常更长。只拉长超时，不额外订阅 loop 任务。
+  esp_task_wdt_init(30, true);
   pinMode(PIN_PWR_HOLD, OUTPUT);
   digitalWrite(PIN_PWR_HOLD, HIGH);
   pinMode(PIN_BTN_DOWN, INPUT_PULLUP);
@@ -119,6 +165,7 @@ void powerOffNow() {
 }
 
 void powerPoll(bool latch_short) {
+  wdtPet();
   pollBootClicks();
   const bool down = digitalRead(PIN_BTN_DOWN) == LOW;
   g_down_held = down;

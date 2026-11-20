@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Web 相册：原图 / 四色预览不再用滚轮缩放（页内滚动、滑条缩放仍可用）
+- Web 顶栏右侧增加 GitHub 仓库链接
+- 仓库更名为 [zectrix-note4c-carte](https://github.com/KyleBing/zectrix-note4c-carte)
+- 看门狗：长操作结束不再误开 loop/idle1 TWDT（Arduino 默认只盯 CPU0 idle）；超时 5s→30s；404 不再解析 HTML。修 12H 记完错误仍复位
+- 天气改为和风官方路径：`/v7/weather/now`、`/v7/weather/24h`、`/v7/weather/7d|15d`、`/geo/v2/city/lookup`（不再打自造的 `/weather/hourly`）
+- 天气：兼容无 `success`、顶层即和风 payload；失败日志带 HTTP / qcode，便于区分服务端失败与看门狗
+- Web：LED 并入 **帮助** 页（`/help`，旧 `/led` 跳转）；相册「设备显示标题栏」改为醒目开关；原图滚轮缩放、空格+拖动平移（类 PS）
 - 文档：[固件行为机制](docs/features/behavior.md)（按键 / Web / 错误日志等运行时说明）
 - 错误事件环（最多 40 条）写入 LittleFS；墨水屏显示「错误详情」；Web **/错误** 页可查看/清空
 - Web 退出 / BOOT：当前 App 在配置里被关掉后，落到第一个可用 App，不再把会话还原到已禁用项
