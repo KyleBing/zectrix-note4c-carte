@@ -24,6 +24,7 @@ struct WeatherNowData {
   String text;
   String icon;
   String wind_dir;
+  String wind_360;  // 和风：风来向角度 0–360，北为 0
   String wind_scale;
   String humidity;
   String precip;

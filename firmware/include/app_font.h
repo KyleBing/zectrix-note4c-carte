@@ -14,6 +14,11 @@ int fontDrawTextWrapped(EpdSsd2683 &epd, int x, int y, int max_w, int max_y, con
                         EpdColor fg = EPD_BLACK, EpdColor bg = EPD_WHITE, int wrap_x = -1,
                         bool strike = false, EpdColor strike_color = EPD_BLACK);
 
+// 1× 字，亮像素两色棋盘抖动（如周六标签红黄混）。
+int fontDrawTextWrappedDither(EpdSsd2683 &epd, int x, int y, int max_w, int max_y, const char *utf8,
+                              EpdColor a = EPD_RED, EpdColor b = EPD_YELLOW, EpdColor bg = EPD_WHITE,
+                              int wrap_x = -1);
+
 // Half-size glyphs (~8px CJK / 4px ASCII), for secondary notes.
 int fontDrawTextWrappedSmall(EpdSsd2683 &epd, int x, int y, int max_w, int max_y, const char *utf8,
                              EpdColor fg = EPD_YELLOW, EpdColor bg = EPD_WHITE, int wrap_x = -1);
@@ -25,3 +30,8 @@ int fontLineHeightDouble();  // 32px：ASCII 16x32 + CJK 32x32
 // 2× HZK/ASC（像素放大），给天气地点等标题用。
 int fontDrawTextWrappedDouble(EpdSsd2683 &epd, int x, int y, int max_w, int max_y, const char *utf8,
                               EpdColor fg = EPD_BLACK, EpdColor bg = EPD_WHITE, int wrap_x = -1);
+
+// 2× 字，亮像素红黄棋盘抖动（湿度等混色）。
+int fontDrawTextWrappedDoubleDither(EpdSsd2683 &epd, int x, int y, int max_w, int max_y,
+                                    const char *utf8, EpdColor a = EPD_RED, EpdColor b = EPD_YELLOW,
+                                    EpdColor bg = EPD_WHITE, int wrap_x = -1);

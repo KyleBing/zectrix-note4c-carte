@@ -120,6 +120,64 @@ static void blitScaled(EpdSsd2683 &epd, int x, int y, int col, int row, int scal
   epd.fillRect(x + col * scale, y + row * scale, scale, scale, c);
 }
 
+static void blitScaledDither(EpdSsd2683 &epd, int x, int y, int col, int row, int scale, EpdColor a,
+                             EpdColor b) {
+  const int px = x + col * scale;
+  const int py = y + row * scale;
+  if (scale <= 1) {
+    epd.setPixel(px, py, ((px + py) & 1) ? b : a);
+    return;
+  }
+  for (int dy = 0; dy < scale; dy++) {
+    for (int dx = 0; dx < scale; dx++) {
+      epd.setPixel(px + dx, py + dy, ((px + dx + py + dy) & 1) ? b : a);
+    }
+  }
+}
+
+static void drawAscDither(EpdSsd2683 &epd, int x, int y, char c, EpdColor a, EpdColor b, EpdColor bg,
+                          int scale) {
+  if (!g_asc || (uint8_t)c > 127) c = '?';
+  const uint8_t *glyph = g_asc + (uint8_t)c * 16;
+  for (int row = 0; row < 16; row++) {
+    uint8_t bits = glyph[row];
+    for (int col = 0; col < 8; col++) {
+      const bool on = (bits & (0x80 >> col)) != 0;
+      if (on) blitScaledDither(epd, x, y, col, row, scale, a, b);
+      else blitScaled(epd, x, y, col, row, scale, bg);
+    }
+  }
+}
+
+static void drawHzkDither(EpdSsd2683 &epd, int x, int y, uint16_t gb, EpdColor a, EpdColor b,
+                          EpdColor bg, int scale) {
+  const int sc = scale <= 1 ? 1 : scale;
+  const int box = 16 * sc;
+  if (!g_hzk || gb < 0xA1A1) {
+    epd.drawRect(x, y, box, box, a);
+    return;
+  }
+  const uint8_t hi = (gb >> 8) & 0xFF;
+  const uint8_t lo = gb & 0xFF;
+  if (hi < 0xA1 || lo < 0xA1) {
+    epd.drawRect(x, y, box, box, a);
+    return;
+  }
+  const uint32_t offset = (uint32_t)(94 * (hi - 0xA1) + (lo - 0xA1)) * 32;
+  const uint8_t *m = g_hzk + offset;
+  for (int row = 0; row < 16; row++) {
+    for (int byteCol = 0; byteCol < 2; byteCol++) {
+      uint8_t bits = m[row * 2 + byteCol];
+      for (int bit = 0; bit < 8; bit++) {
+        const bool on = (bits & (0x80 >> bit)) != 0;
+        const int col = byteCol * 8 + bit;
+        if (on) blitScaledDither(epd, x, y, col, row, sc, a, b);
+        else blitScaled(epd, x, y, col, row, sc, bg);
+      }
+    }
+  }
+}
+
 static void drawAsc(EpdSsd2683 &epd, int x, int y, char c, EpdColor fg, EpdColor bg, int scale = 1) {
   if (!g_asc || (uint8_t)c > 127) c = '?';
   const uint8_t *glyph = g_asc + (uint8_t)c * 16;
@@ -156,6 +214,61 @@ static void drawHzk(EpdSsd2683 &epd, int x, int y, uint16_t gb, EpdColor fg, Epd
       }
     }
   }
+}
+
+// ℃：字库有则用 HZK；否则 16×16 自制（ASC「C」+ 左上 3×3 方点）
+static void drawCelsiusCustom(EpdSsd2683 &epd, int x, int y, EpdColor fg, EpdColor bg, int scale,
+                              bool dither, EpdColor dither_b) {
+  const int sc = scale <= 1 ? 1 : scale;
+  for (int row = 0; row < 16; row++) {
+    for (int col = 0; col < 16; col++) {
+      blitScaled(epd, x, y, col, row, sc, bg);
+    }
+  }
+  // ASC C 偏右下，给左上角留出圆点位
+  if (g_asc) {
+    const uint8_t *glyph = g_asc + (uint8_t)'C' * 16;
+    constexpr int kOx = 5;
+    constexpr int kOy = 1;
+    for (int row = 0; row < 16; row++) {
+      if (kOy + row >= 16) break;
+      uint8_t bits = glyph[row];
+      for (int col = 0; col < 8; col++) {
+        if (!(bits & (0x80 >> col))) continue;
+        const int c = kOx + col;
+        const int r = kOy + row;
+        if (c < 0 || c >= 16 || r < 0 || r >= 16) continue;
+        if (dither) blitScaledDither(epd, x, y, c, r, sc, fg, dither_b);
+        else blitScaled(epd, x, y, c, r, sc, fg);
+      }
+    }
+  }
+  // 左上 3×3 方点
+  for (int row = 0; row < 3; row++) {
+    for (int col = 0; col < 3; col++) {
+      if (dither) blitScaledDither(epd, x, y, col, row, sc, fg, dither_b);
+      else blitScaled(epd, x, y, col, row, sc, fg);
+    }
+  }
+}
+
+static void drawCelsius(EpdSsd2683 &epd, int x, int y, EpdColor fg, EpdColor bg, int scale = 1) {
+  const uint16_t gb = unicodeToGb(0x2103);
+  if (gb) {
+    drawHzk(epd, x, y, gb, fg, bg, scale);
+    return;
+  }
+  drawCelsiusCustom(epd, x, y, fg, bg, scale, false, fg);
+}
+
+static void drawCelsiusDither(EpdSsd2683 &epd, int x, int y, EpdColor a, EpdColor b, EpdColor bg,
+                              int scale) {
+  const uint16_t gb = unicodeToGb(0x2103);
+  if (gb) {
+    drawHzkDither(epd, x, y, gb, a, b, bg, scale);
+    return;
+  }
+  drawCelsiusCustom(epd, x, y, a, bg, scale, true, b);
 }
 
 static int glyphWidth(uint32_t cp) {
@@ -275,6 +388,9 @@ int fontDrawTextWrapped(EpdSsd2683 &epd, int x, int y, int max_w, int max_y, con
     if (cp < 0x80) {
       drawAsc(epd, cx, cy, (char)cp, fg, bg);
       cx += 8;
+    } else if (cp == 0x2103) {
+      drawCelsius(epd, cx, cy, fg, bg);
+      cx += 16;
     } else {
       const uint16_t gb = unicodeToGb(cp);
       drawHzk(epd, cx, cy, gb, fg, bg);
@@ -283,6 +399,70 @@ int fontDrawTextWrapped(EpdSsd2683 &epd, int x, int y, int max_w, int max_y, con
   }
   if (!drew) return y;
   strikeLine();
+  return cy + kLineH;
+}
+
+int fontDrawTextWrappedDither(EpdSsd2683 &epd, int x, int y, int max_w, int max_y, const char *utf8,
+                              EpdColor a, EpdColor b, EpdColor bg, int wrap_x) {
+  if (!utf8) return y;
+  const int origin_x = (wrap_x >= 0) ? wrap_x : x;
+  const int right = origin_x + max_w;
+  int cx = x;
+  int cy = y;
+  bool drew = false;
+  const char *p = utf8;
+
+  auto newline = [&]() {
+    cx = origin_x;
+    cy += kLineH;
+  };
+
+  int glyphs = 0;
+  while (*p && cy + kLineH <= max_y) {
+    if ((++glyphs & 15) == 0) wdtPet();
+    if (*p == '\r') {
+      p++;
+      continue;
+    }
+    if (*p == '\n') {
+      p++;
+      newline();
+      continue;
+    }
+
+    uint32_t cp = 0;
+    utf8Next(p, cp);
+    const int w = glyphWidth(cp);
+    if (cx + w > right && cx > origin_x) {
+      newline();
+      if (cy + kLineH > max_y) break;
+    }
+
+    drew = true;
+    if (!g_ready) {
+      if (cp < 0x80) {
+        epd.drawChar(cx, cy + 4, (char)cp, a, bg);
+        cx += 6;
+      } else {
+        epd.drawRect(cx, cy, 12, 12, a);
+        cx += 12;
+      }
+      continue;
+    }
+
+    if (cp < 0x80) {
+      drawAscDither(epd, cx, cy, (char)cp, a, b, bg, 1);
+      cx += 8;
+    } else if (cp == 0x2103) {
+      drawCelsiusDither(epd, cx, cy, a, b, bg, 1);
+      cx += 16;
+    } else {
+      const uint16_t gb = unicodeToGb(cp);
+      drawHzkDither(epd, cx, cy, gb, a, b, bg, 1);
+      cx += 16;
+    }
+  }
+  if (!drew) return y;
   return cy + kLineH;
 }
 
@@ -400,9 +580,79 @@ int fontDrawTextWrappedDouble(EpdSsd2683 &epd, int x, int y, int max_w, int max_
     if (cp < 0x80) {
       drawAsc(epd, cx, cy, (char)cp, fg, bg, kScale);
       cx += 8 * kScale;
+    } else if (cp == 0x2103) {
+      drawCelsius(epd, cx, cy, fg, bg, kScale);
+      cx += 16 * kScale;
     } else {
       const uint16_t gb = unicodeToGb(cp);
       drawHzk(epd, cx, cy, gb, fg, bg, kScale);
+      cx += 16 * kScale;
+    }
+  }
+  if (!drew) return y;
+  return cy + line_h;
+}
+
+int fontDrawTextWrappedDoubleDither(EpdSsd2683 &epd, int x, int y, int max_w, int max_y,
+                                    const char *utf8, EpdColor a, EpdColor b, EpdColor bg,
+                                    int wrap_x) {
+  if (!utf8) return y;
+  constexpr int kScale = 2;
+  const int line_h = kLineH * kScale;
+  const int origin_x = (wrap_x >= 0) ? wrap_x : x;
+  const int right = origin_x + max_w;
+  int cx = x;
+  int cy = y;
+  bool drew = false;
+  const char *p = utf8;
+
+  auto newline = [&]() {
+    cx = origin_x;
+    cy += line_h;
+  };
+
+  int glyphs = 0;
+  while (*p && cy + line_h <= max_y) {
+    if ((++glyphs & 15) == 0) wdtPet();
+    if (*p == '\r') {
+      p++;
+      continue;
+    }
+    if (*p == '\n') {
+      p++;
+      newline();
+      continue;
+    }
+
+    uint32_t cp = 0;
+    utf8Next(p, cp);
+    const int w = glyphWidth(cp) * kScale;
+    if (cx + w > right && cx > origin_x) {
+      newline();
+      if (cy + line_h > max_y) break;
+    }
+
+    drew = true;
+    if (!g_ready) {
+      if (cp < 0x80) {
+        epd.drawChar(cx, cy + 8, (char)cp, a, bg);
+        cx += 12;
+      } else {
+        epd.drawRect(cx, cy, 24, 24, a);
+        cx += 24;
+      }
+      continue;
+    }
+
+    if (cp < 0x80) {
+      drawAscDither(epd, cx, cy, (char)cp, a, b, bg, kScale);
+      cx += 8 * kScale;
+    } else if (cp == 0x2103) {
+      drawCelsiusDither(epd, cx, cy, a, b, bg, kScale);
+      cx += 16 * kScale;
+    } else {
+      const uint16_t gb = unicodeToGb(cp);
+      drawHzkDither(epd, cx, cy, gb, a, b, bg, kScale);
       cx += 16 * kScale;
     }
   }

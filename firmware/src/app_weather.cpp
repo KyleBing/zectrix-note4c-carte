@@ -11,6 +11,7 @@
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -325,6 +326,7 @@ bool weatherFetchNow(WeatherNowData &out) {
     n0["text"] = true;
     n0["icon"] = true;
     n0["windDir"] = true;
+    n0["wind360"] = true;
     n0["windScale"] = true;
     n0["humidity"] = true;
     n0["precip"] = true;
@@ -361,6 +363,7 @@ bool weatherFetchNow(WeatherNowData &out) {
   out.text = jsonField(now["text"]);
   out.icon = jsonField(now["icon"]);
   out.wind_dir = jsonField(now["windDir"]);
+  out.wind_360 = jsonField(now["wind360"]);
   out.wind_scale = jsonField(now["windScale"]);
   out.humidity = jsonField(now["humidity"]);
   out.precip = jsonField(now["precip"]);
@@ -586,6 +589,7 @@ static constexpr int kWxPadY = kWxEdge + 15;  // 上下再各 +15
 struct WeatherChartCol {
   int t_hi = 0;
   int t_lo = 0;
+  int weekday = -1;  // 0=日 … 6=六；7d 周几着色用
   WxIcon icon = WxIcon::Cloudy;
   char above[12] = {};   // 小时：柱顶气温
   char cap1[16] = {};    // 大字第 1 行（小时时间 / 日日期）
@@ -632,6 +636,69 @@ static int mapTempY(int t, int t_min, int t_max, int y_top, int y_bot) {
   return y_top + (int)((long)(t_max - t) * (y_bot - y_top) / (t_max - t_min));
 }
 
+// 棋盘抖动：1px 色 A、1px 色 B，混成中间色
+static void fillDitherRect(EpdSsd2683 &epd, int x, int y, int w, int h, EpdColor a, EpdColor b) {
+  if (w <= 0 || h <= 0) return;
+  for (int row = y; row < y + h; row++) {
+    for (int col = x; col < x + w; col++) {
+      epd.setPixel(col, row, ((col + row) & 1) ? b : a);
+    }
+  }
+}
+
+// 7D 柱色带（见 docs/features/behavior.md）：band_lo 为区间下界
+//   ≤-10 黑；[-10,0) 红黑抖；[0,10) 红；[10,20) 红黄抖；[20,30) 红白抖；≥30 黄
+static void fillTempZoneRect(EpdSsd2683 &epd, int bx, int bar_w, int y0, int y1, int band_lo) {
+  if (y1 < y0 || bar_w <= 0) return;
+  const int h = y1 - y0 + 1;
+  if (band_lo >= 30) {
+    epd.fillRect(bx, y0, bar_w, h, Theme::Accent);
+  } else if (band_lo >= 20) {
+    fillDitherRect(epd, bx, y0, bar_w, h, Theme::Alert, Theme::Bg);
+  } else if (band_lo >= 10) {
+    fillDitherRect(epd, bx, y0, bar_w, h, Theme::Alert, Theme::Accent);
+  } else if (band_lo >= 0) {
+    epd.fillRect(bx, y0, bar_w, h, Theme::Alert);
+  } else if (band_lo >= -10) {
+    fillDitherRect(epd, bx, y0, bar_w, h, Theme::Alert, Theme::Fg);
+  } else {
+    epd.fillRect(bx, y0, bar_w, h, Theme::Fg);
+  }
+}
+
+static void fillTempSeg(EpdSsd2683 &epd, int bx, int bar_w, int seg_lo, int seg_hi, int band_lo,
+                        int t_min, int t_max, int y_top, int y_bot, int clip_y0, int clip_y1) {
+  if (seg_lo > seg_hi) return;
+  int y0 = mapTempY(seg_hi, t_min, t_max, y_top, y_bot);
+  int y1 = mapTempY(seg_lo, t_min, t_max, y_top, y_bot);
+  if (y1 < y0) {
+    const int tmp = y0;
+    y0 = y1;
+    y1 = tmp;
+  }
+  y0 = imax(y0, clip_y0);
+  y1 = imin(y1, clip_y1);
+  fillTempZoneRect(epd, bx, bar_w, y0, y1, band_lo);
+}
+
+// 半开区间 [lo, hi)：从冷到热填，分界像素归更高一档
+static void fillTempBandedBar(EpdSsd2683 &epd, int bx, int bar_w, int t_lo, int t_hi, int t_min,
+                              int t_max, int y_top, int y_bot, int clip_y0, int clip_y1) {
+  if (bar_w <= 0 || clip_y1 < clip_y0) return;
+  if (t_hi < t_lo) {
+    const int tmp = t_hi;
+    t_hi = t_lo;
+    t_lo = tmp;
+  }
+  static const int kLo[] = {-1000, -10, 0, 10, 20, 30};
+  static const int kHi[] = {-10, 0, 10, 20, 30, 1000};
+  for (int i = 0; i < 6; i++) {
+    if (t_hi < kLo[i] || t_lo >= kHi[i]) continue;
+    fillTempSeg(epd, bx, bar_w, imax(t_lo, kLo[i]), imin(t_hi, kHi[i]), kLo[i], t_min, t_max,
+                y_top, y_bot, clip_y0, clip_y1);
+  }
+}
+
 static void drawCenteredLarge(EpdSsd2683 &epd, int cx, int y, int max_y, const char *s,
                               EpdColor fg = Theme::Fg) {
   if (!s || !s[0]) return;
@@ -658,8 +725,9 @@ static void drawTempRangeChart(EpdSsd2683 &epd, int y, int bottom, const Weather
   const int cap_h = hourly ? lh : (lh * 2 + kDateWdGap);
   const int above_h = lh + 3;
   const int min_lab_h = hourly ? 0 : (lh + 3);
+  constexpr int kBarCapGap = 8;  // 柱底与小时/日期标签间距
   const int y_top = y + icon_sz + 5 + above_h;
-  const int y_bot = bottom - cap_h - 5 - min_lab_h;
+  const int y_bot = bottom - cap_h - kBarCapGap - min_lab_h;
   if (y_bot - y_top < 20) return;
 
   int t_min = cols[0].t_lo;
@@ -700,11 +768,21 @@ static void drawTempRangeChart(EpdSsd2683 &epd, int y, int bottom, const Weather
       }
     }
     const int bx = cx - bar_w / 2;
-    epd.fillRect(bx, y_hi, bar_w, y_lo - y_hi + 1, Theme::Alert);
-
     if (hourly) {
+      epd.fillRect(bx, y_hi, bar_w, y_lo - y_hi + 1, Theme::Alert);
       drawCenteredLarge(epd, cx, y_hi - 3 - lh, y_hi, cols[i].above, Theme::Alert);
     } else {
+      fillTempBandedBar(epd, bx, bar_w, cols[i].t_lo, cols[i].t_hi, t_min, t_max, y_top, y_bot,
+                        y_hi, y_lo);
+      // 最低高度撑开时，空隙用端点色带补齐
+      const int mapped_hi = mapTempY(cols[i].t_hi, t_min, t_max, y_top, y_bot);
+      const int mapped_lo = mapTempY(cols[i].t_lo, t_min, t_max, y_top, y_bot);
+      if (y_hi < mapped_hi) {
+        fillTempZoneRect(epd, bx, bar_w, y_hi, mapped_hi - 1, cols[i].t_hi);
+      }
+      if (y_lo > mapped_lo) {
+        fillTempZoneRect(epd, bx, bar_w, mapped_lo + 1, y_lo, cols[i].t_lo);
+      }
       char hi_s[8], lo_s[8];
       snprintf(hi_s, sizeof(hi_s), "%d", cols[i].t_hi);
       snprintf(lo_s, sizeof(lo_s), "%d", cols[i].t_lo);
@@ -712,12 +790,18 @@ static void drawTempRangeChart(EpdSsd2683 &epd, int y, int bottom, const Weather
       drawCenteredLarge(epd, cx, y_lo + 4, y_lo + 4 + lh, lo_s, Theme::Alert);
     }
 
-    int cy = y_bot + 5 + min_lab_h;
+    int cy = y_bot + kBarCapGap + min_lab_h;
     if (hourly) {
       drawCenteredLarge(epd, cx, cy, bottom, cols[i].cap1);
     } else {
       drawCenteredLarge(epd, cx, cy, cy + lh, cols[i].cap1);
-      drawCenteredLarge(epd, cx, cy + lh + kDateWdGap, bottom, cols[i].cap2);
+      const int wd_y = cy + lh + kDateWdGap;
+      // 周六、周日红色；其余黑
+      if (cols[i].weekday == 0 || cols[i].weekday == 6) {
+        drawCenteredLarge(epd, cx, wd_y, bottom, cols[i].cap2, Theme::Alert);
+      } else {
+        drawCenteredLarge(epd, cx, wd_y, bottom, cols[i].cap2);
+      }
     }
   }
 }
@@ -740,19 +824,116 @@ static void drawErrorPage(EpdSsd2683 &epd, WeatherMode mode, const char *msg, co
   epd.display();
 }
 
+// 风来向角度：优先 wind360；否则解析中文风向。返回 -1 表示未知。
+static int windFromDeg(const WeatherNowData &now) {
+  if (now.wind_360.length()) {
+    const int d = now.wind_360.toInt();
+    if (d >= 0 && d <= 360) return d % 360;
+  }
+  const String &s = now.wind_dir;
+  if (!s.length()) return -1;
+  if (s.indexOf("东北") >= 0) return 45;
+  if (s.indexOf("东南") >= 0) return 135;
+  if (s.indexOf("西南") >= 0) return 225;
+  if (s.indexOf("西北") >= 0) return 315;
+  if (s.indexOf("北") >= 0) return 0;
+  if (s.indexOf("东") >= 0) return 90;
+  if (s.indexOf("南") >= 0) return 180;
+  if (s.indexOf("西") >= 0) return 270;
+  return -1;
+}
+
+// 纸飞机实心风向标（由发送箭头 SVG 归一化，尖端朝北=上）。单位约 ±100。
+static const int8_t kWindOuter[][2] = {
+    {0, -100}, {-4, -99}, {-7, -95}, {-62, 37}, {-62, 41}, {-60, 46}, {-56, 48}, {-51, 47},
+    {0, 21},   {53, 46},  {58, 47},  {62, 45},  {64, 41},  {63, 36},  {7, -95},  {4, -99},
+};
+static const int8_t kWindInner[][2] = {
+    {42, 24}, {4, 6}, {0, 5}, {-40, 25}, {0, -73},
+};
+static constexpr int kWindOuterN = sizeof(kWindOuter) / sizeof(kWindOuter[0]);
+static constexpr int kWindInnerN = sizeof(kWindInner) / sizeof(kWindInner[0]);
+
+static bool windPointInPoly(int x, int y, const int (*poly)[2], int n) {
+  bool inside = false;
+  for (int i = 0, j = n - 1; i < n; j = i++) {
+    const int yi = poly[i][1], yj = poly[j][1];
+    const int xi = poly[i][0], xj = poly[j][0];
+    const bool cross = ((yi > y) != (yj > y));
+    if (!cross) continue;
+    const int den = yj - yi;
+    if (den == 0) continue;
+    const int xinter = xi + (int)((long)(xj - xi) * (y - yi) / den);
+    if (x < xinter) inside = !inside;
+  }
+  return inside;
+}
+
+// 箭头指向风来向（北=上）。cx,cy 为中心；实心纸飞机造型。
+static void drawWindArrow(EpdSsd2683 &epd, int cx, int cy, int deg, EpdColor c) {
+  constexpr float kPi = 3.14159265f;
+  constexpr float kScale = 0.12f;  // 100 → 12px
+  const float rad = (float)deg * kPi / 180.0f;
+  const float cos_t = cosf(rad);
+  const float sin_t = sinf(rad);
+
+  int outer[kWindOuterN][2];
+  int inner[kWindInnerN][2];
+  int min_x = 1000, min_y = 1000, max_x = -1000, max_y = -1000;
+
+  auto xform = [&](int ux, int uy, int &ox, int &oy) {
+    // 单位：x 东、y 北（尖端 y=-100 → 北）。按气象角顺时针旋转。
+    const float mx = (float)ux;
+    const float my = -(float)uy;
+    const float rx = mx * cos_t + my * sin_t;
+    const float ry = -mx * sin_t + my * cos_t;
+    ox = cx + (int)lroundf(rx * kScale);
+    oy = cy - (int)lroundf(ry * kScale);
+  };
+
+  for (int i = 0; i < kWindOuterN; i++) {
+    xform(kWindOuter[i][0], kWindOuter[i][1], outer[i][0], outer[i][1]);
+    min_x = imin(min_x, outer[i][0]);
+    max_x = imax(max_x, outer[i][0]);
+    min_y = imin(min_y, outer[i][1]);
+    max_y = imax(max_y, outer[i][1]);
+  }
+  for (int i = 0; i < kWindInnerN; i++) {
+    xform(kWindInner[i][0], kWindInner[i][1], inner[i][0], inner[i][1]);
+    min_x = imin(min_x, inner[i][0]);
+    max_x = imax(max_x, inner[i][0]);
+    min_y = imin(min_y, inner[i][1]);
+    max_y = imax(max_y, inner[i][1]);
+  }
+
+  for (int y = min_y; y <= max_y; y++) {
+    for (int x = min_x; x <= max_x; x++) {
+      const bool on = windPointInPoly(x, y, outer, kWindOuterN) ^
+                      windPointInPoly(x, y, inner, kWindInnerN);
+      if (on) epd.setPixel(x, y, c);
+    }
+  }
+}
+
 void weatherDrawNow(EpdSsd2683 &epd, const WeatherNowData &now, const WeatherHourlyData &hourly,
                     const char *status) {
   (void)status;
   epd.clear(Theme::Bg);
-  int y = wxTop();
+  constexpr int kNowTop = 18;       // 上区距顶
+  constexpr int kNowIconGap = 10;   // 大图标与右侧信息
+  constexpr int kNowBelowGap = 15;  // 上区与下方小时柱
+  int y = kNowTop;
   const int bottom = wxBottom();
   if (!now.ok) {
     drawErrorBody(epd, y, now.message.length() ? now.message.c_str() : "(error)");
   } else {
     char line[112];
+    char temp_s[16];
+    char hum_s[16];
     const int big = 90;
+    const int dlh = fontLineHeightDouble();
     wxIconDraw(epd, kWxEdge, y, wxIconFromCode(now.icon.c_str()), big);
-    const int tx = kWxEdge + big + 8;
+    const int tx = kWxEdge + big + kNowIconGap;
     const AppConfig &cfg = getAppConfig();
     const char *loc = cfg.qweather_location_name;
     int loc_col = 0;
@@ -771,28 +952,59 @@ void weatherDrawNow(EpdSsd2683 &epd, const WeatherNowData &now, const WeatherHou
         tw = loc_x - 8 - tx;
       }
     }
-    int ty = y;
-    snprintf(line, sizeof(line), "%s  %sC", now.text.c_str(), now.temp.c_str());
-    ty = fontDrawTextWrapped(epd, tx, ty, tw, bottom, line, Theme::Alert) + 3;
-    snprintf(line, sizeof(line), "湿度 %s%%  体感 %sC", now.humidity.c_str(), now.feels_like.c_str());
-    ty = fontDrawTextWrapped(epd, tx, ty, tw, bottom, line, Theme::Fg) + 3;
+
+    // 上区相对 90px 图标纵向居中
+    const int lh = fontLineHeight();
+    const int block_h = dlh + 4 + lh;
+    const int content_y = y + imax(0, (big - block_h) / 2);
+    const int loc_y = y + imax(0, (big - dlh) / 2);
+
+    // 一行 2×：天气名 + 气温℃ + 湿度（湿度红黄抖）
+    snprintf(temp_s, sizeof(temp_s), "%s℃", now.temp.c_str());
+    snprintf(hum_s, sizeof(hum_s), "%s%%", now.humidity.c_str());
+    const char *name = now.text.c_str();
+    const int gap = 10;
+    int cx = tx;
+    const int row1_y = content_y;
+    const int row1_max_y = row1_y + dlh;
+    if (name && name[0]) {
+      fontDrawTextWrappedDouble(epd, cx, row1_y, tw - (cx - tx), row1_max_y, name, Theme::Alert);
+      cx += largeTextWidth(name) * 2 + gap;
+    }
+    if (now.temp.length()) {
+      fontDrawTextWrappedDouble(epd, cx, row1_y, imax(8, tw - (cx - tx)), row1_max_y, temp_s,
+                                Theme::Alert);
+      cx += largeTextWidth(temp_s) * 2 + gap;
+    }
+    if (now.humidity.length() && cx - tx < tw) {
+      fontDrawTextWrappedDoubleDither(epd, cx, row1_y, imax(8, tw - (cx - tx)), row1_max_y, hum_s,
+                                      Theme::Alert, Theme::Accent);
+    }
+    int ty = content_y + dlh + 4;
+
+    // 次行：风向箭头 + 级数；空气质量（无 PM2.5）
+    int meta_x = tx;
+    const int wind_deg = windFromDeg(now);
+    if (wind_deg >= 0) {
+      drawWindArrow(epd, meta_x + 12, ty + lh / 2, wind_deg, Theme::Fg);
+      meta_x += 28;
+    }
+    if (now.wind_scale.length()) {
+      snprintf(line, sizeof(line), "%s级", now.wind_scale.c_str());
+      const int ww = largeTextWidth(line);
+      fontDrawTextWrapped(epd, meta_x, ty, ww + 4, ty + lh, line, Theme::Fg);
+      meta_x += ww + 12;
+    }
     if (now.aqi_category.length() || now.aqi.length()) {
-      if (now.pm2p5.length()) {
-        snprintf(line, sizeof(line), "空气 %s %s  PM2.5 %s", now.aqi_category.c_str(),
-                 now.aqi.c_str(), now.pm2p5.c_str());
-      } else {
-        snprintf(line, sizeof(line), "空气 %s %s", now.aqi_category.c_str(), now.aqi.c_str());
-      }
-      ty = fontDrawTextWrapped(epd, tx, ty, tw, bottom, line, Theme::Fg) + 3;
+      snprintf(line, sizeof(line), "空气 %s %s", now.aqi_category.c_str(), now.aqi.c_str());
+      fontDrawTextWrapped(epd, meta_x, ty, imax(8, (tx + tw) - meta_x), ty + lh, line, Theme::Fg);
     }
-    if (now.wind_dir.length() || now.wind_scale.length()) {
-      snprintf(line, sizeof(line), "风 %s %s级", now.wind_dir.c_str(), now.wind_scale.c_str());
-      ty = fontDrawTextWrapped(epd, tx, ty, tw, bottom, line, Theme::Fg);
-    }
+    ty += lh + 2;
+
     if (loc_col > 0) {
-      fontDrawTextWrappedDouble(epd, loc_x, y, loc_col, y + big, loc, Theme::Fg);
+      fontDrawTextWrappedDouble(epd, loc_x, loc_y, loc_col, loc_y + dlh, loc, Theme::Fg);
     }
-    y = imax(y + big, ty) + 4;
+    y = y + big + kNowBelowGap;
     if (!hourly.ok || hourly.count <= 0) {
       drawErrorBody(epd, y, hourly.message.length() ? hourly.message.c_str() : "(no 6h)");
     } else {
@@ -831,9 +1043,9 @@ void weatherDrawForecast(EpdSsd2683 &epd, const WeatherDailyData &d, WeatherMode
       cols[i].t_lo = imin(hi, lo);
       int ymd_y = 0, ymd_m = 0, ymd_d = 0;
       if (parseYmd(d.days[i].fx_date, ymd_y, ymd_m, ymd_d)) {
+        cols[i].weekday = weekdayFromYmd(ymd_y, ymd_m, ymd_d);
         snprintf(cols[i].cap1, sizeof(cols[i].cap1), "%02d/%02d", ymd_m, ymd_d);
-        snprintf(cols[i].cap2, sizeof(cols[i].cap2), "周%s",
-                 weekdayCn(weekdayFromYmd(ymd_y, ymd_m, ymd_d)));
+        snprintf(cols[i].cap2, sizeof(cols[i].cap2), "周%s", weekdayCn(cols[i].weekday));
       } else {
         const int dd = dayFromFxDate(d.days[i].fx_date);
         if (dd >= 0) snprintf(cols[i].cap1, sizeof(cols[i].cap1), "%02d", dd);
