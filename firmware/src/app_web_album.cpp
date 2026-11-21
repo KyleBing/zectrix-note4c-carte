@@ -84,15 +84,11 @@ void webAlbumAppendPage(String &b) {
          "<p class=meta id=convInfo></p>"
          "</div></div>"
       "<div class=ed-maps>"
-      "<div class=ed-side-h>"
-      "<h3>颜色替换</h3>"
-      "<button type=button id=btnClearMaps class=secondary>清空连线</button>"
-      "</div>"
-      "<div class=ed-block>"
       "<div class=ed-map-bar>"
       "<button type=button id=btnPick class=secondary>取色</button>"
-      "<span class=hint style=margin:0>先点中间原色，再在左图上取色，或点两侧衍生色，就把该颜色替换成这个原色。点连线可改容差。左列偏暗，右列偏亮。</span>"
+      "<button type=button id=btnClearMaps class=secondary>清空连线</button>"
       "</div>"
+      "<div class=ed-map-body>"
       "<div class=ed-wire id=wireWrap>"
       "<div id=mixL class='mix-col side-l'></div>"
       "<div class=ed-inks id=mapPal>"
@@ -104,18 +100,26 @@ void webAlbumAppendPage(String &b) {
       "<div id=mixR class='mix-col side-r'></div>"
       "<svg id=wires class=ed-wires></svg>"
       "</div>"
-      "<div id=tolPop class=tol-pop hidden>"
-      "<span id=tolLab>容差</span><input type=range id=tol min=8 max=120 value=36><em id=tolV>36</em>"
+      "<div id=tolPop class=tol-pop>"
+      "<span id=tolLab>容差</span>"
+      "<input type=range id=tol class=tol-v min=8 max=120 value=36 orient=vertical>"
+      "<em id=tolV>36</em>"
       "</div>"
+      "</div>"
+      "<p class=hint ed-map-hint>先点中间原色，再在左图上取色，或点两侧衍生色，就把该颜色替换成这个原色。点连线可改容差；选中后 Backspace / Delete 删除。左列偏暗，右列偏亮。</p>"
       "<div id=rules class=rules></div>"
-      "</div>"
       "</div></div>"
       "<aside class=ed-side>"
       "<div class=ed-mode>"
       "<button type=button id=modeGrain class=on>颗粒</button>"
       "<button type=button id=modeSolid>色块</button>"
       "</div>"
+      "<div class=ed-side-ops>"
       "<div class=ed-block>"
+      "<div class=ink-hist-wrap><canvas id=inkHist width=320 height=48></canvas></div>"
+      "<div class=ink-hist-read>"
+      "<span id=ink0>黑 —</span><span id=ink1>白 —</span><span id=ink2>黄 —</span><span id=ink3>红 —</span>"
+      "</div>"
       "<div class=ed-row><span>亮度</span><input type=range id=brt min=20 max=180 value=100><em id=brtV>100%</em></div>"
       "<div class=ed-row><span>对比</span><input type=range id=con min=20 max=220 value=100><em id=conV>100%</em></div>"
       "<div class=ed-row><span>饱和</span><input type=range id=sat min=0 max=250 value=100><em id=satV>100%</em></div>"
@@ -123,6 +127,7 @@ void webAlbumAppendPage(String &b) {
       "<div class=ed-row><span>色温</span><input type=range id=tmp min=-80 max=80 value=0><em id=tmpV>0</em></div>"
       "<div class=ed-row id=dithRow><span>颗粒</span><input type=range id=dith min=20 max=160 value=100><em id=dithV>100%</em></div>"
       "</div>"
+      "<div class=ed-levels>"
       "<div class=ed-side-h>"
       "<h3>色阶</h3>"
       "</div>"
@@ -138,6 +143,8 @@ void webAlbumAppendPage(String &b) {
       "<div class=ed-row><span>黄墨</span><input type=range id=yel min=0 max=220 value=100><em id=yelV>100%</em></div>"
       "<div class=ed-row><span>红墨</span><input type=range id=red min=0 max=220 value=100><em id=redV>100%</em></div>"
       "<div class=ed-row><span>灰阈</span><input type=range id=chr min=0 max=80 value=8><em id=chrV>8</em></div>"
+      "</div>"
+      "</div>"
       "</div>"
       "</div>"
       "<p class=hint ed-help>左图载入后一直是原图。调色、色块和颜色替换只改右图。点中间原色后，可在左图取色或点两侧衍生色来替换；点连线改容差。左列偏暗，右列偏亮。色块是不带颗粒的纯色块。空格+拖动平移。</p>"
@@ -171,6 +178,7 @@ let drag=false,lx=0,ly=0,tmr=null,adjRgb=null,rawLum=null;
 let baseIdx=null,paint=new Int8Array(W*H);
 let blk=0,mid=128,wht=255,outBlk=0,outWht=255,histDrag=-1,editName='',brushCol=0,loupeRight=false,visCol=-1;
 let spaceHeld=false,pvDrag=false,pvx=0,pvy=0;
+let cropCv=null,cropCtx=null,srcRaf=0,geomTmr=null;
 function typingTarget(el){
   if(!el) return false;
   const t=el.tagName;
@@ -255,18 +263,29 @@ function setBrushCol(n){
   brushCol=n;
   for(let i=0;i<4;i++) $('br'+i).classList.toggle('on',i===n);
 }
-function cropRGB(){
-  const c=document.createElement('canvas');
-  c.width=W;c.height=H;
-  const ctx=c.getContext('2d',{willReadFrequently:true});
+function drawCropTo(ctx){
   ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);
-  if(img){
-    const s0=cover?Math.max(W/img.width,H/img.height):Math.min(W/img.width,H/img.height);
-    const s=s0*(val('zoom')/100);
-    const dw=img.width*s,dh=img.height*s;
-    ctx.drawImage(img,(W-dw)/2+val('panx'),(H-dh)/2+val('pany'),dw,dh);
+  if(!img) return;
+  const s0=cover?Math.max(W/img.width,H/img.height):Math.min(W/img.width,H/img.height);
+  const s=s0*(val('zoom')/100);
+  const dw=img.width*s,dh=img.height*s;
+  ctx.drawImage(img,(W-dw)/2+val('panx'),(H-dh)/2+val('pany'),dw,dh);
+}
+function paintSourceView(){
+  if(srcRaf) return;
+  srcRaf=requestAnimationFrame(function(){
+    srcRaf=0;
+    drawCropTo($('src').getContext('2d'));
+  });
+}
+function cropRGB(){
+  if(!cropCv){
+    cropCv=document.createElement('canvas');
+    cropCv.width=W;cropCv.height=H;
+    cropCtx=cropCv.getContext('2d',{willReadFrequently:true});
   }
-  const id=ctx.getImageData(0,0,W,H);
+  drawCropTo(cropCtx);
+  const id=cropCtx.getImageData(0,0,W,H);
   const d=id.data;
   rawLum=new Uint8Array(W*H);
   for(let i=0,p=0;i<d.length;i+=4,p++){
@@ -379,6 +398,48 @@ function drawHist(){
   tri(mid,'#9a9a9a','#111');
   tri(wht,'#fff','#111');
 }
+function drawInkHist(idx){
+  const cv=$('inkHist');
+  if(!cv) return;
+  const dpr=Math.max(1,window.devicePixelRatio||1);
+  const cssW=Math.max(1,cv.clientWidth||320);
+  const cssH=48;
+  if(cv.width!==Math.round(cssW*dpr)||cv.height!==Math.round(cssH*dpr)){
+    cv.width=Math.round(cssW*dpr);
+    cv.height=Math.round(cssH*dpr);
+  }
+  const ctx=cv.getContext('2d');
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  const padY=4;
+  const barH=cssH-padY*2;
+  const colW=cssW/4;
+  const bw=Math.min(22,Math.max(10,colW*0.42));
+  ctx.clearRect(0,0,cssW,cssH);
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,cssW,cssH);
+  const counts=[0,0,0,0];
+  const src=idx||(baseIdx?composedIdx():null);
+  if(src) for(let i=0;i<src.length;i++) counts[src[i]&3]++;
+  const total=Math.max(1,src?src.length:1);
+  let mx=1;
+  for(let i=0;i<4;i++) if(counts[i]>mx) mx=counts[i];
+  for(let i=0;i<4;i++){
+    const x=colW*i+(colW-bw)/2;
+    const bh=src?counts[i]/mx*barH:0;
+    const y=padY+barH-bh;
+    const p=PAL[i];
+    ctx.fillStyle='rgb('+p[0]+','+p[1]+','+p[2]+')';
+    if(bh>0) ctx.fillRect(x,y,bw,bh);
+    if(i===1){
+      ctx.strokeStyle='#888';
+      ctx.strokeRect(x+0.5,y+0.5,bw-1,Math.max(0,bh-1));
+    }
+    const el=$('ink'+i);
+    if(el){
+      const pct=src?Math.round(counts[i]*1000/total)/10:0;
+      el.textContent=PN[i]+' '+(src?pct+'%':'—');
+    }
+  }
+}
 function blitIdx(idx){
   const pv=$('preview').getContext('2d');
   const pid=pv.createImageData(W,H);
@@ -420,6 +481,7 @@ function refreshFinal(){
   const idx=composedIdx();
   blitIdx(idx);
   packed=packIdx(idx);
+  drawInkHist(idx);
   return idx;
 }
 function drawSource(){
@@ -472,15 +534,29 @@ function pack(dither){
 function run(dither){
   setEm();
   if(!img){$('convInfo').textContent='先选一张图';return;}
-  pack(!!dither);
+  const useGrain=grain&&!!dither;
+  pack(useGrain);
   $('btnUpload').disabled=false;
   $('btnSaveAs').disabled=false;
   $('btnUpload').textContent=editName?'覆盖':'上传';
-  $('convInfo').textContent=(grain?(dither?'颗粒 ':'色块 '):'色块 ')+(editName?editName:'新照片');
+  $('convInfo').textContent=(grain?'颗粒 ':'色块 ')+(editName?editName:'新照片');
 }
-function schedule(dither){
+function schedule(final){
   clearTimeout(tmr);
-  tmr=setTimeout(function(){run(dither);}, dither?120:40);
+  clearTimeout(geomTmr);
+  // 拖动滑块时也按当前模式预览（颗粒=抖动，色块=最近色）
+  tmr=setTimeout(function(){run(grain);}, (final||grain)?120:40);
+}
+// 平移/缩放：左侧立刻重绘；右侧轻量防抖，松手再按模式出最终预览
+function scheduleGeom(final){
+  clearTimeout(tmr);
+  clearTimeout(geomTmr);
+  paintSourceView();
+  if(final){
+    geomTmr=setTimeout(function(){run(grain);}, 16);
+    return;
+  }
+  geomTmr=setTimeout(function(){run(false);}, 90);
 }
 function mixLabel(cnt){
   const parts=[];
@@ -513,19 +589,28 @@ function paintMixes(){
   });
   for(let k=0;k<4;k++) $('map'+k).classList.toggle('arm', k===mapTo);
 }
+function syncTolHeight(){
+  const pop=$('tolPop'),wrap=$('wireWrap');
+  if(!pop||!wrap) return;
+  pop.style.height=wrap.offsetHeight+'px';
+}
 function syncTolPop(){
   const pop=$('tolPop');
   if(!pop) return;
-  if(selRule<0||!rules[selRule]){pop.hidden=true;return;}
-  const u=rules[selRule];
-  $('tol').value=u.tol;
-  $('tolLab').textContent=PN[u.to]+' ← '+ruleName(u)+'  容差';
-  pop.hidden=false;
+  if(selRule>=0&&rules[selRule]){
+    const u=rules[selRule];
+    $('tol').value=u.tol;
+    $('tolLab').textContent=PN[u.to]+' ← '+ruleName(u);
+  }else{
+    $('tolLab').textContent='容差';
+  }
   setEm();
+  requestAnimationFrame(function(){syncTolHeight();drawWires();});
 }
 function drawWires(){
   const wrap=$('wireWrap'),svg=$('wires');
   if(!wrap||!svg) return;
+  syncTolHeight();
   const wr=wrap.getBoundingClientRect();
   svg.setAttribute('width',Math.max(1,wr.width));
   svg.setAttribute('height',Math.max(1,wr.height));
@@ -648,6 +733,10 @@ function canvasXY(cv,e){
   const y=Math.max(0,Math.min(H-1,Math.floor((e.clientY-r.top)*H/r.height)));
   return [x,y, (e.clientX-r.left)/r.width, (e.clientY-r.top)/r.height];
 }
+function pointerInCanvas(cv,e){
+  const r=cv.getBoundingClientRect();
+  return e.clientX>=r.left&&e.clientX<r.right&&e.clientY>=r.top&&e.clientY<r.bottom;
+}
 function stampPaint(cx,cy,r,col){
   const rr=r*r;
   for(let y=cy-r;y<=cy+r;y++){
@@ -729,10 +818,10 @@ srcCv.onpointermove=function(e){
   const r=srcCv.getBoundingClientRect();
   $('panx').value=val('panx')+(e.clientX-lx)*W/r.width;
   $('pany').value=val('pany')+(e.clientY-ly)*H/r.height;
-  lx=e.clientX;ly=e.clientY;schedule(false);
+  lx=e.clientX;ly=e.clientY;scheduleGeom(false);
 };
-srcCv.onpointerup=function(){if(drag){drag=false;syncCursor();schedule(true);}};
-srcCv.onpointercancel=function(){drag=false;syncCursor();};
+srcCv.onpointerup=function(){if(drag){drag=false;syncCursor();scheduleGeom(true);}};
+srcCv.onpointercancel=function(){if(drag){drag=false;syncCursor();scheduleGeom(true);}else syncCursor();};
 srcCv.onpointerleave=function(){if(tool==='pick'&&!spaceHeld) $('loupe').style.display='none';};
 const pvCv=$('preview');
 const pvBox=$('pvInner').parentElement;
@@ -740,6 +829,15 @@ function paintAt(e){
   const xy=canvasXY(pvCv,e);
   stampPaint(xy[0],xy[1],val('brush'),tool==='erase'?1:brushCol);
   refreshFinal();
+}
+function endBrushStroke(e){
+  if(!drag||(tool!=='erase'&&tool!=='brush')) return;
+  drag=false;
+  if(e&&e.pointerId!=null){
+    try{pvCv.releasePointerCapture(e.pointerId);}catch(_){}
+  }
+  clearCursor();
+  syncCursor();
 }
 pvCv.onpointerdown=function(e){
   if(tool==='pick'){
@@ -758,13 +856,17 @@ pvCv.onpointermove=function(e){
     pvBox.scrollTop-=(e.clientY-pvy);
     pvx=e.clientX;pvy=e.clientY;return;
   }
+  if(drag&&(tool==='erase'||tool==='brush')&&!pointerInCanvas(pvCv,e)){
+    endBrushStroke(e);
+    return;
+  }
   const xy=canvasXY(pvCv,e);
   if(tool==='erase'||tool==='brush') drawBrushCursor(xy[0],xy[1]);
   if(drag&&(tool==='erase'||tool==='brush')) paintAt(e);
 };
-pvCv.onpointerup=function(){pvDrag=false;drag=false;syncCursor();};
-pvCv.onpointercancel=function(){pvDrag=false;drag=false;syncCursor();};
-pvCv.onpointerleave=function(){clearCursor();};
+pvCv.onpointerup=function(e){pvDrag=false;endBrushStroke(e);drag=false;syncCursor();};
+pvCv.onpointercancel=function(e){pvDrag=false;endBrushStroke(e);drag=false;syncCursor();};
+pvCv.onpointerleave=function(e){clearCursor();endBrushStroke(e);};
 function forwardWheel(e){
   e.preventDefault();
   e.stopPropagation();
@@ -778,15 +880,25 @@ function forwardWheel(e){
   el.addEventListener('wheel',forwardWheel,{passive:false,capture:true});
 });
 window.addEventListener('keydown',function(e){
-  if(e.code!=='Space'&&e.key!==' ') return;
-  if(typingTarget(e.target)) return;
-  e.preventDefault();
-  if(!spaceHeld){spaceHeld=true;syncCursor();}
+  if(e.code==='Space'||e.key===' '){
+    if(typingTarget(e.target)) return;
+    e.preventDefault();
+    if(!spaceHeld){spaceHeld=true;syncCursor();}
+    return;
+  }
+  if((e.key==='Backspace'||e.key==='Delete')&&selRule>=0){
+    if(typingTarget(e.target)) return;
+    e.preventDefault();
+    rules.splice(selRule,1);
+    selRule=-1;
+    renderRules();
+    schedule(true);
+  }
 });
 window.addEventListener('keyup',function(e){
   if(e.code!=='Space'&&e.key!==' ') return;
   spaceHeld=false;
-  if(drag){drag=false;schedule(true);}
+  if(drag){drag=false;scheduleGeom(true);}
   pvDrag=false;
   syncCursor();
 });
@@ -844,8 +956,17 @@ bindLevel('inWht','inWhtN',function(v){wht=Math.max(mid+1,Math.min(255,v|0));});
   $(id).onchange=function(){schedule(true);};
 });
 ['zoom','yel','red','brush','brt','con','sat','hue','tmp','chr','dith'].forEach(function(id){
-  $(id).oninput=function(){setEm();if(id==='brush') return;schedule(false);};
-  $(id).onchange=function(){if(id==='brush') return;schedule(true);};
+  $(id).oninput=function(){
+    setEm();
+    if(id==='brush') return;
+    if(id==='zoom'){scheduleGeom(false);return;}
+    schedule(false);
+  };
+  $(id).onchange=function(){
+    if(id==='brush') return;
+    if(id==='zoom'){scheduleGeom(true);return;}
+    schedule(true);
+  };
 });
 $('tol').oninput=function(){
   setEm();
@@ -862,6 +983,36 @@ $('tol').onchange=function(){
     schedule(true);
   }
 };
+const SLIDER_DEF={
+  zoom:100,brush:6,brt:100,con:100,sat:100,hue:0,tmp:0,
+  yel:100,red:100,chr:8,dith:100,tol:36,
+  inBlk:0,inMid:128,inWht:255,outBlk:0,outWht:255
+};
+function applySliderDefault(id){
+  const d=SLIDER_DEF[id];
+  if(d==null||!$(id)) return;
+  $(id).value=d;
+  if(id==='inBlk'){blk=Math.max(0,Math.min(mid-1,d));fillLevelInputs();}
+  else if(id==='inMid'){mid=Math.max(blk+1,Math.min(wht-1,d));fillLevelInputs();}
+  else if(id==='inWht'){wht=Math.max(mid+1,Math.min(255,d));fillLevelInputs();}
+  else if(id==='outBlk'){outBlk=d;if(outWht<=outBlk) outWht=Math.min(255,outBlk+1);fillLevelInputs();}
+  else if(id==='outWht'){outWht=d;if(outWht<=outBlk) outBlk=Math.max(0,outWht-1);fillLevelInputs();}
+  else if(id==='tol'&&selRule>=0&&rules[selRule]){rules[selRule].tol=d;renderRules();}
+  setEm();
+  if(id==='brush') return;
+  if(id==='zoom'){scheduleGeom(true);return;}
+  if(id==='inBlk'||id==='inMid'||id==='inWht') drawHist();
+  schedule(true);
+}
+Object.keys(SLIDER_DEF).forEach(function(id){
+  const el=$(id);
+  if(!el) return;
+  el.title=(el.title?el.title+' · ':'')+'双击复位';
+  el.addEventListener('dblclick',function(e){
+    e.preventDefault();
+    applySliderDefault(id);
+  });
+});
 function setGrain(on,skip){
   grain=!!on;
   $('modeGrain').classList.toggle('on',grain);
@@ -1092,7 +1243,7 @@ $('selAll').onchange=async function(){
 paint.fill(-1);
 buildMixes();
 window.addEventListener('resize',function(){requestAnimationFrame(drawWires);});
-setTool('pan');setBrushCol(0);setEm();renderRules();drawHist();refreshList();
+setTool('pan');setBrushCol(0);setEm();renderRules();drawHist();drawInkHist();refreshList();
 </script>)ALBUMJS";
 }
 
