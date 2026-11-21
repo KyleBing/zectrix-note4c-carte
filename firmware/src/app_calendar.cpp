@@ -5,7 +5,6 @@
 #include "app_lunar.h"
 #include "app_rtc.h"
 #include "app_theme.h"
-#include "app_footer.h"
 #include "app_version.h"
 #include "app_wifi.h"
 #include "app_errorlog.h"
@@ -32,27 +31,72 @@ static int colFromWeekday(int wd_sun0, bool monday_first) {
   return wd_sun0;
 }
 
-// Half-size glyph width estimate (ASCII 4px / CJK 8px).
-static int textWidthSmall(const char *utf8) {
+// Width estimate: small = ASCII 4 / CJK 8; full = ASCII 8 / CJK 16.
+static int textWidthUtf8(const char *utf8, bool small) {
   if (!utf8) return 0;
+  const int aw = small ? 4 : 8;
+  const int cw = small ? 8 : 16;
   int w = 0;
   const uint8_t *p = (const uint8_t *)utf8;
   while (*p) {
     if (*p < 0x80) {
-      w += 4;
+      w += aw;
       p++;
     } else if (*p < 0xE0) {
-      w += 8;
+      w += cw;
       p += 2;
     } else if (*p < 0xF0) {
-      w += 8;
+      w += cw;
       p += 3;
     } else {
-      w += 8;
+      w += cw;
       p += 4;
     }
   }
   return w;
+}
+
+static int utf8CharCount(const char *utf8) {
+  if (!utf8) return 0;
+  int n = 0;
+  const uint8_t *p = (const uint8_t *)utf8;
+  while (*p) {
+    n++;
+    if (*p < 0x80)
+      p++;
+    else if (*p < 0xE0)
+      p += 2;
+    else if (*p < 0xF0)
+      p += 3;
+    else
+      p += 4;
+  }
+  return n;
+}
+
+// 小字竖排：每字一行，返回占用高度。
+static int drawTextVerticalSmall(EpdSsd2683 &epd, int x, int y, int max_y, const char *utf8,
+                                 EpdColor fg, EpdColor bg) {
+  if (!utf8 || !utf8[0]) return 0;
+  const int lh = fontLineHeightSmall();
+  const int cw = 8;
+  int cy = y;
+  const uint8_t *p = (const uint8_t *)utf8;
+  while (*p && cy + lh <= max_y) {
+    char ch[5] = {0};
+    int nbytes = 1;
+    if (*p >= 0xF0)
+      nbytes = 4;
+    else if (*p >= 0xE0)
+      nbytes = 3;
+    else if (*p >= 0xC0)
+      nbytes = 2;
+    for (int i = 0; i < nbytes && p[i]; i++) ch[i] = (char)p[i];
+    p += nbytes;
+    fontDrawTextWrappedSmall(epd, x, cy, cw + 2, cy + lh, ch, fg, bg);
+    cy += lh;
+  }
+  return cy - y;
 }
 
 bool calendarShow(EpdSsd2683 &epd) {
@@ -82,15 +126,11 @@ bool calendarShow(EpdSsd2683 &epd) {
   }
 
   epd.clear(Theme::Bg);
-  headerDrawAppBar(epd, AppId::Calendar, nullptr);
-  char ym[24];
-  snprintf(ym, sizeof(ym), "%d年%d月", now.year, now.month);
-  fontDrawTextWrapped(epd, Theme::MarginX, 3, 200, Theme::HeaderH, ym, Theme::HeaderFg,
-                      Theme::HeaderBg);
 
   const bool monday_first = getAppConfig().week_start_monday;
 
-  constexpr int grid_top = 28;
+  // 无头部：顶边留小间距，格子吃满屏高
+  constexpr int grid_top = 4;
   constexpr int grid_left = Theme::MarginX;
   constexpr int grid_w = 400 - Theme::MarginX * 2;
   constexpr int cols = 7;
@@ -99,20 +139,16 @@ bool calendarShow(EpdSsd2683 &epd) {
   constexpr int gap_above_line = 3;
   constexpr int gap_below_line = 3;
   constexpr int rows = 6;
-  constexpr int day_lun_gap = 1;
+  constexpr int kLunGap = 3;
+  constexpr int kLunCw = 8;  // 小字 CJK 宽
 
   const int line_y = grid_top + wd_h + gap_above_line;
   const int days_top = line_y + 1 + gap_below_line;
 
-  const int day_h = fontLineHeight();
+  // 2× 公历数字 + 右侧竖排小字农历
+  const int day_h = fontLineHeightDouble();
   const int lun_h = fontLineHeightSmall();
-  const int block_h = day_h + day_lun_gap + lun_h;
-  const int min_cell_h = block_h + 2;
-
-  // Prefer footer; drop it if cells would be too short.
-  const int avail_with_footer = Theme::FooterY - 2 - days_top;
-  const bool show_footer = (avail_with_footer / rows) >= min_cell_h;
-  const int grid_bottom = show_footer ? (Theme::FooterY - 2) : (EpdSsd2683::kHeight - 2);
+  const int grid_bottom = EpdSsd2683::kHeight - 2;
   const int cell_h = (grid_bottom - days_top) / rows;
 
   static const char *kWdSun[] = {"日", "一", "二", "三", "四", "五", "六"};
@@ -141,40 +177,85 @@ bool calendarShow(EpdSsd2683 &epd) {
     const bool today = (d == now.day);
     const bool weekend = monday_first ? (c >= 5) : (c == 0 || c == 6);
 
+    // 格子内农历：仅农历月初显示月份名（正月/二月…）
     LunarDate lun;
     char lun_lab[12] = "";
-    if (lunarFromSolar(now.year, now.month, d, lun)) {
+    if (lunarFromSolar(now.year, now.month, d, lun) && lun.ok && lun.day == 1) {
       lunarDayLabel(lun, lun_lab, sizeof(lun_lab), true);
     }
 
     char num[4];
     snprintf(num, sizeof(num), "%d", d);
-    const int num_w = (int)strlen(num) * 8;
-    const int lun_w = lun_lab[0] ? textWidthSmall(lun_lab) : 0;
-    const int use_h = lun_lab[0] ? block_h : day_h;
-    const int block_y = y0 + (cell_h - use_h) / 2;
-    const int day_x = x0 + (cell_w - num_w) / 2;
-    const int lun_x = lun_w > 0 ? x0 + (cell_w - lun_w) / 2 : x0;
+    const int num_w = textWidthUtf8(num, false) * 2;  // 2×
+    const bool has_lun = lun_lab[0] != '\0';
+    const int lun_total_h = has_lun ? utf8CharCount(lun_lab) * lun_h : 0;
+    // 数字 + 竖排农历贴一起（间距 3px），整体在格内居中
+    const int block_w = has_lun ? (num_w + kLunGap + kLunCw) : num_w;
+    const int block_h = has_lun ? (day_h > lun_total_h ? day_h : lun_total_h) : day_h;
+    const int block_x = x0 + (cell_w - block_w) / 2;
+    const int block_y = y0 + (cell_h - block_h) / 2;
+    const int day_x = block_x;
+    const int day_y = block_y + (block_h - day_h) / 2;
+    const int lun_x = block_x + num_w + kLunGap;
+    const int lun_y = block_y + (block_h - lun_total_h) / 2;
 
-    const EpdColor bg = today ? Theme::Alert : Theme::Bg;
+    const EpdColor bg = today ? Theme::HeaderBg : Theme::Bg;
     const EpdColor day_fg = today ? Theme::HeaderFg : (weekend ? Theme::Alert : Theme::Fg);
-    // Red lunar; today cell is red fill → keep white for contrast
     const EpdColor lun_fg = today ? Theme::HeaderFg : Theme::Alert;
 
     if (today) {
-      epd.fillRect(x0 + 1, y0 + 1, cell_w - 2, cell_h - 2, Theme::Alert);
+      epd.fillRect(x0 + 1, y0 + 1, cell_w - 2, cell_h - 2, Theme::HeaderBg);
     }
 
-    fontDrawTextWrapped(epd, day_x, block_y, num_w + 2, block_y + day_h, num, day_fg, bg);
-    if (lun_lab[0]) {
-      const int lun_y = block_y + day_h + day_lun_gap;
-      fontDrawTextWrappedSmall(epd, lun_x, lun_y, lun_w + 2, lun_y + lun_h, lun_lab, lun_fg, bg);
+    fontDrawTextWrappedDouble(epd, day_x, day_y, num_w + 2, day_y + day_h, num, day_fg, bg);
+    if (has_lun) {
+      drawTextVerticalSmall(epd, lun_x, lun_y, y0 + cell_h - 1, lun_lab, lun_fg, bg);
     }
   }
 
-  if (show_footer) {
-    footerDraw(epd, "refresh");
+  // 今日农历（贴在年月旁）
+  char today_lun_lab[24] = "";
+  {
+    LunarDate today_lun;
+    if (lunarFromSolar(now.year, now.month, now.day, today_lun) && today_lun.ok) {
+      static const char *kLunMon[] = {"正", "二", "三", "四", "五", "六",
+                                     "七", "八", "九", "十", "冬", "腊"};
+      char daylab[12] = "";
+      lunarDayLabel(today_lun, daylab, sizeof(daylab), false);
+      if (today_lun.month >= 1 && today_lun.month <= 12) {
+        snprintf(today_lun_lab, sizeof(today_lun_lab), "%s%s月%s", today_lun.leap ? "闰" : "",
+                 kLunMon[today_lun.month - 1], daylab);
+      }
+    }
   }
+
+  // 年月右下角：字体「2026年11月」+ 旁附今日农历
+  {
+    char lab[20];
+    snprintf(lab, sizeof(lab), "%d年%d月", now.year, now.month);
+
+    constexpr int kYmLunGap = 6;
+    constexpr int kPad = 2;
+
+    const int th = fontLineHeight();
+    const int tw = textWidthUtf8(lab, false);
+    const int lun_w = today_lun_lab[0] ? textWidthUtf8(today_lun_lab, false) : 0;
+    const int lun_extra = lun_w ? (kYmLunGap + lun_w) : 0;
+    const int total_w = tw + lun_extra;
+    const int block_h = th;
+
+    const int tx = grid_left + grid_w - total_w - kPad;
+    const int ty = days_top + rows * cell_h - block_h - kPad;
+
+    int cx = tx;
+    if (lun_w) {
+      fontDrawTextWrapped(epd, cx, ty, lun_w + 2, ty + th, today_lun_lab, Theme::Alert, Theme::Bg);
+      cx += lun_w + kYmLunGap;
+    }
+
+    fontDrawTextWrapped(epd, cx, ty, tw + 4, ty + th, lab, Theme::Fg, Theme::Bg);
+  }
+
   epd.display();
   return true;
 }

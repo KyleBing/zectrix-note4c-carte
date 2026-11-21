@@ -18,6 +18,7 @@
 #include <FS.h>
 #include <LittleFS.h>
 #include <cstdio>
+#include <cstring>
 
 static WebServer g_server(80);
 static bool g_running = false;
@@ -43,17 +44,17 @@ main{max-width:720px;margin:16px auto;padding:0 16px 28px}
 section{display:block;background:#fff;border-radius:12px;padding:18px 16px;margin-bottom:14px;box-shadow:0 1px 2px rgba(0,0,0,.05)}
 h2{font-size:15px;margin:0 0 14px;font-weight:650}
 .hint{color:#6b6b6b;font-size:13px;margin:0 0 14px}
-.ok{color:#0a7a4b}.err{color:#b42318}
+.ok{color:#0a7a4b}.err{color:#8b2010}
 .flash{padding:10px 12px;border-radius:8px;margin:0 0 14px;font-size:13px}
 .flash.ok{background:#e8f7ef;color:#0a7a4b}
-.flash.err{background:#fdecec;color:#b42318}
+.flash.err{background:#fdecec;color:#8b2010}
 label{display:block;font-size:12px;margin:12px 0 5px;color:#555;font-weight:500}
 input,textarea,select{width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;background:#fafafa}
 input:focus,textarea:focus,select:focus{outline:0;border-color:#1a1a1a;background:#fff}
 .btn-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
 button,.btn{background:#1a1a1a;color:#fff;border:0;border-radius:8px;padding:11px 16px;font-size:14px;cursor:pointer}
 button.secondary{background:#5c5c5c}
-button.danger{background:#b42318}
+button.danger{background:#8b2010}
 code{font-size:12px;background:#f3f3f3;padding:1px 5px;border-radius:4px}
 pre{white-space:pre-wrap;background:#f7f7f5;padding:12px;border-radius:8px;font-size:13px;margin:0}
 .kv{display:grid;grid-template-columns:88px 1fr;gap:8px 12px;align-items:baseline;margin:0}
@@ -128,7 +129,7 @@ body.page-album main{max-width:none;width:100%;margin:0;padding:0;display:block}
 .ed-zoom{position:absolute;inset:0;width:100%;height:100%;overflow:hidden}
 .ed-toast{position:fixed;top:56px;left:50%;transform:translate(-50%,-12px);background:#0a7a4b;color:#fff;padding:12px 24px;font-size:16px;font-weight:700;z-index:80;opacity:0;pointer-events:none;box-shadow:0 8px 28px rgba(0,0,0,.22);transition:opacity .18s,transform .18s;letter-spacing:.02em}
 .ed-toast.show{opacity:1;transform:translate(-50%,0)}
-.ed-toast.err{background:#b42318}
+.ed-toast.err{background:#8b2010}
 #loupe{position:absolute;width:96px;height:96px;border:2px solid #111;image-rendering:pixelated;background:#fff;pointer-events:none;display:none;box-shadow:0 4px 16px rgba(0,0,0,.25);z-index:2}
 .ed-foot{display:flex;flex-wrap:nowrap;align-items:center;gap:6px;height:40px;padding:0 8px;overflow:visible;border-top:1px solid #d0cec8;grid-row:2;background:#fff;align-self:start}
 .ed-foot:last-child{border-left:1px solid #d0cec8}
@@ -157,7 +158,7 @@ body.page-album main{max-width:none;width:100%;margin:0;padding:0;display:block}
 .ed-inks .pal-k{background:#111;border-color:#111}
 .ed-inks .pal-w{background:#fff;border-color:#888}
 .ed-inks .pal-y{background:#F6C749;border-color:#c9a02a}
-.ed-inks .pal-r{background:#701B0E;border-color:#4a1209}
+.ed-inks .pal-r{background:#8b2010;border-color:#5c150a}
 .ed-inks button.arm{box-shadow:0 0 0 2px #fff,0 0 0 4px #111}
 .ed-wires{position:absolute;inset:0;width:100%;height:100%;overflow:visible;z-index:1;pointer-events:none}
 .ed-wires line{pointer-events:stroke;cursor:pointer}
@@ -195,7 +196,7 @@ body.page-album main{max-width:none;width:100%;margin:0;padding:0;display:block}
 .pal-sw button.pal-k,.ed-toolbar .pal-sw button.pal-k{background:#111;border-color:#111}
 .pal-sw button.pal-w,.ed-toolbar .pal-sw button.pal-w{background:#fff;border-color:#888}
 .pal-sw button.pal-y,.ed-toolbar .pal-sw button.pal-y{background:#F6C749;border-color:#c9a02a}
-.pal-sw button.pal-r,.ed-toolbar .pal-sw button.pal-r{background:#701B0E;border-color:#4a1209}
+.pal-sw button.pal-r,.ed-toolbar .pal-sw button.pal-r{background:#8b2010;border-color:#5c150a}
 .rules{font-size:11px;margin:4px 0 0;max-height:none;overflow:visible}
 .rules .item{display:flex;align-items:center;gap:6px;padding:4px 4px;cursor:pointer;border:1px solid transparent}
 .rules .item.on{background:#eceae4;border-color:#111}
@@ -214,8 +215,8 @@ body.page-album main{max-width:none;width:100%;margin:0;padding:0;display:block}
 .thumb canvas{width:100%;height:auto;aspect-ratio:4/3;image-rendering:pixelated;display:block;background:#fff;cursor:pointer}
 .thumb .row{display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap}
 .thumb .row.meta-row{justify-content:space-between}
-.thumb .row.acts{margin-top:4px;gap:6px}
-.thumb .row.acts button{margin:0;padding:4px 8px;font-size:11px;border-radius:0;flex:1}
+.thumb .row.acts{margin-top:4px;gap:6px;flex-wrap:nowrap}
+.thumb .row.acts button{margin:0;padding:4px 6px;font-size:11px;border-radius:0;flex:1 1 0;min-width:0;white-space:nowrap}
 .thumb .row code{font-size:10px}
 .show-lab{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#1a1a1a;cursor:pointer;user-select:none}
 .show-lab input{width:16px;height:16px;margin:0;accent-color:#0a7a4b;padding:0;flex-shrink:0}
@@ -267,7 +268,7 @@ body.page-album main{max-width:none;width:100%;margin:0;padding:0;display:block}
 .err-list li{padding:12px 0;border-bottom:1px solid #f0f0f0}
 .err-list li:last-child{border-bottom:0}
 .err-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
-.err-src{display:inline-block;padding:2px 8px;border-radius:999px;background:#fdecec;color:#b42318;font-size:12px;font-weight:650}
+.err-src{display:inline-block;padding:2px 8px;border-radius:999px;background:#fdecec;color:#8b2010;font-size:12px;font-weight:650}
 .err-when{font-size:12px;color:#888;font-variant-numeric:tabular-nums}
 .err-msg{margin:0;white-space:pre-wrap;background:#faf7f5;border:1px solid #f0e6e4;padding:10px 12px;border-radius:8px;font-size:13px;color:#1a1a1a;line-height:1.4}
 )CSS";
@@ -330,37 +331,49 @@ static void appendFlashFromQuery(String &b) {
   b += F("</div>");
 }
 
-static void sendHtml(NavTab active, const String &body) {
-  String page;
-  page.reserve(body.length() + 2000);
-  page += F("<!DOCTYPE html><html><head><meta charset=utf-8>"
-            "<meta name=viewport content='width=device-width,initial-scale=1'>"
-            "<link rel=icon href=/favicon.svg type=image/svg+xml>"
-            "<title>Carte 配置</title><style>");
-  page += kCss;
-  page += F("</style></head><body");
-  if (active == NavTab::Album) page += F(" class=page-album");
-  page += F("><header>"
-            "<div class=brand>"
-            "<img class=site-logo src=/favicon.svg alt='' width=28 height=28>"
-            "<h1>Carte</h1></div><nav>");
-  appendNavLink(page, NavTab::Status, active, "/", "状态");
-  appendNavLink(page, NavTab::Settings, active, "/settings", "设置");
-  appendNavLink(page, NavTab::Wifi, active, "/wifi", "WiFi");
-  appendNavLink(page, NavTab::Auth, active, "/auth", "鉴权");
-  appendNavLink(page, NavTab::Todo, active, "/todo", "待办");
-  appendNavLink(page, NavTab::Weather, active, "/weather", "天气");
-  appendNavLink(page, NavTab::Album, active, "/album", "相册");
-  appendNavLink(page, NavTab::Errors, active, "/errors", "错误");
-  appendNavLink(page, NavTab::Help, active, "/help", "帮助");
-  page += F("</nav>"
-            "<a class=gh href='https://github.com/KyleBing/zectrix-note4c-carte' target=_blank rel=noopener title=GitHub aria-label=GitHub>"
-            "<svg viewBox='0 0 16 16' width=22 height=22 fill=currentColor aria-hidden=true>"
-            "<path d='M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z'/>"
-            "</svg></a></header><main>");
-  page += body;
-  page += F("</main></body></html>");
-  g_server.send(200, "text/html; charset=utf-8", page);
+// Chunked send: avoid one giant String (album page ~70KB used to OOM → blank).
+using SendHtmlExtraFn = void (*)(WebServer &);
+
+static void sendHtml(NavTab active, const String &body, SendHtmlExtraFn extra = nullptr) {
+  g_server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  g_server.send(200, "text/html; charset=utf-8", "");
+
+  g_server.sendContent(F("<!DOCTYPE html><html><head><meta charset=utf-8>"
+                         "<meta name=viewport content='width=device-width,initial-scale=1'>"
+                         "<link rel=icon href=/favicon.svg type=image/svg+xml>"
+                         "<title>Carte 配置</title><style>"));
+  g_server.sendContent(kCss, strlen(kCss));
+  g_server.sendContent(F("</style></head><body"));
+  if (active == NavTab::Album) g_server.sendContent(F(" class=page-album"));
+
+  {
+    String nav;
+    nav.reserve(1800);
+    nav += F("><header>"
+             "<div class=brand>"
+             "<img class=site-logo src=/favicon.svg alt='' width=28 height=28>"
+             "<h1>Carte</h1></div><nav>");
+    appendNavLink(nav, NavTab::Status, active, "/", "状态");
+    appendNavLink(nav, NavTab::Settings, active, "/settings", "设置");
+    appendNavLink(nav, NavTab::Wifi, active, "/wifi", "WiFi");
+    appendNavLink(nav, NavTab::Auth, active, "/auth", "鉴权");
+    appendNavLink(nav, NavTab::Todo, active, "/todo", "待办");
+    appendNavLink(nav, NavTab::Weather, active, "/weather", "天气");
+    appendNavLink(nav, NavTab::Album, active, "/album", "相册");
+    appendNavLink(nav, NavTab::Errors, active, "/errors", "错误");
+    appendNavLink(nav, NavTab::Help, active, "/help", "帮助");
+    nav += F("</nav>"
+             "<a class=gh href='https://github.com/KyleBing/zectrix-note4c-carte' target=_blank rel=noopener title=GitHub aria-label=GitHub>"
+             "<svg viewBox='0 0 16 16' width=22 height=22 fill=currentColor aria-hidden=true>"
+             "<path d='M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z'/>"
+             "</svg></a></header><main>");
+    g_server.sendContent(nav);
+  }
+
+  if (body.length()) g_server.sendContent(body);
+  if (extra) extra(g_server);
+  g_server.sendContent(F("</main></body></html>"));
+  g_server.sendContent("");  // end chunked
 }
 
 static void kvRow(String &b, const char *k, const String &v) {
@@ -415,6 +428,17 @@ static void handleRoot() {
     kvRow(b, "天气", String("<span class='pill off'>关闭</span>"));
   }
   {
+    if (cfg.weather_refresh_sec == 0) {
+      kvRow(b, "天气刷新", String("关闭"));
+    } else {
+      uint32_t d = 0, h = 0, m = 0;
+      weatherRefreshToDhm(cfg.weather_refresh_sec, d, h, m);
+      char buf[48];
+      snprintf(buf, sizeof(buf), "%u 天 %u 时 %u 分", (unsigned)d, (unsigned)h, (unsigned)m);
+      kvRow(b, "天气刷新", String(buf));
+    }
+  }
+  {
     AlbumList al;
     albumList(al);
     char buf[32];
@@ -430,6 +454,7 @@ static void handleRoot() {
       snprintf(idle, sizeof(idle), "%u 秒", (unsigned)cfg.idle_off_sec);
     }
     kvRow(b, "自动关机", String(idle));
+    kvRow(b, "接电仍关机", String(cfg.idle_off_on_power ? "是" : "否"));
   }
   kvRow(b, "一周起始", String(cfg.week_start_monday ? "周一" : "周日"));
   {
@@ -537,7 +562,8 @@ static void handleSettingsGet() {
 
   b += F("<section><h2>电源</h2>"
          "<p class=hint>无操作自动关机是本固件自己的计时，不是芯片默认。按下任意键会重新计时。"
-         "开启 Web 配置期间不会自动关机，方便慢慢配网。</p>"
+         "开启 Web 配置期间不会自动关机，方便慢慢配网。"
+         "「连接电源时自动关机」关闭后，充电/充满（接 USB）时不会因空闲关机。</p>"
          "<form method=POST action=/power>"
          "<label>无操作自动关机</label>"
          "<select name=idle_off_sec>");
@@ -563,6 +589,12 @@ static void handleSettingsGet() {
     b += F(" 秒</option>");
   }
   b += F("</select>");
+  b += F("<label>连接电源时自动关机</label><select name=idle_off_on_power>");
+  b += F("<option value=0");
+  if (!cfg.idle_off_on_power) b += F(" selected");
+  b += F(">关闭（接电保持开机）</option><option value=1");
+  if (cfg.idle_off_on_power) b += F(" selected");
+  b += F(">开启（接电也空闲关机）</option></select>");
   b += F("<label>日历一周起始</label><select name=week_start>");
   b += F("<option value=mon");
   if (cfg.week_start_monday) b += F(" selected");
@@ -644,6 +676,7 @@ static void handlePowerPost() {
   const uint32_t sec = (uint32_t)g_server.arg("idle_off_sec").toInt();
   saveIdleOffSec(sec);
   powerIdleSetTimeoutSec(sec);
+  saveIdleOffOnPower(g_server.arg("idle_off_on_power") == "1");
   const String ws = g_server.arg("week_start");
   saveWeekStartMonday(ws != "sun");
   redirectOk("/settings", "power");
@@ -937,6 +970,28 @@ static void appendWeatherForm(String &b, const AppConfig &cfg, const WeatherGeoR
   b += F("<div class=btn-row><button type=submit name=action value=save>保存开关</button></div>");
   b += F("</form></section>");
 
+  {
+    uint32_t d = 0, h = 0, m = 0;
+    weatherRefreshToDhm(cfg.weather_refresh_sec, d, h, m);
+    b += F("<section><h2>自动刷新</h2>"
+           "<p class=hint>设备开机且未开配置页时，到期会自动拉天气并刷屏。"
+           "填 <strong>0 天 0 时 0 分</strong> 关闭；开启时合计至少 <strong>1 分钟</strong>。"
+           "请把「无操作自动关机」设为关闭或长于本间隔，否则会先睡过去。</p>"
+           "<form method=POST action=/weather>"
+           "<div class=btn-row style=align-items:flex-end;gap:10px>"
+           "<label style=margin:0>天<br><input name=refresh_d type=number min=0 max=365 step=1 value=");
+    b += String(d);
+    b += F(" style=width:5.5em></label>"
+           "<label style=margin:0>时<br><input name=refresh_h type=number min=0 max=23 step=1 value=");
+    b += String(h);
+    b += F(" style=width:5.5em></label>"
+           "<label style=margin:0>分<br><input name=refresh_m type=number min=0 max=59 step=1 value=");
+    b += String(m);
+    b += F(" style=width:5.5em></label>"
+           "<button type=submit name=action value=refresh>保存间隔</button>"
+           "</div></form></section>");
+  }
+
   b += F("<section><h2>搜索位置</h2>");
   b += F("<p class=hint>经 Portal <code>/geo/v2/city/lookup</code> 调和风城市搜索；需「同 WiFi 站点」已连接并登录。</p>");
   b += F("<form method=POST action=/weather>");
@@ -1008,6 +1063,25 @@ static void handleWeatherPost() {
     saveQWeatherConfig(enabled, cfg.qweather_host, cfg.qweather_key, cfg.qweather_location_id,
                        cfg.qweather_location_name);
     flash = F("<div class='flash ok'>天气开关已保存</div>");
+  } else if (action == "refresh") {
+    const uint32_t d = (uint32_t)g_server.arg("refresh_d").toInt();
+    const uint32_t h = (uint32_t)g_server.arg("refresh_h").toInt();
+    const uint32_t m = (uint32_t)g_server.arg("refresh_m").toInt();
+    const uint32_t sec = weatherRefreshSecFromDhm(d, h, m);
+    saveWeatherRefreshSec(sec);
+    if (sec == 0) {
+      flash = F("<div class='flash ok'>已关闭天气自动刷新</div>");
+    } else {
+      uint32_t od = 0, oh = 0, om = 0;
+      weatherRefreshToDhm(sec, od, oh, om);
+      flash = F("<div class='flash ok'>自动刷新：");
+      flash += String(od);
+      flash += F(" 天 ");
+      flash += String(oh);
+      flash += F(" 时 ");
+      flash += String(om);
+      flash += F(" 分</div>");
+    }
   } else if (action == "search") {
     const String q = g_server.arg("geo_query");
     if (!weatherGeoLookup(q.c_str(), geo)) {
@@ -1043,8 +1117,9 @@ static void handleWeatherPost() {
 static void handleAlbumGet() {
   albumEnsureDir();
   String b;
+  b.reserve(10000);
   webAlbumAppendPage(b);
-  sendHtml(NavTab::Album, b);
+  sendHtml(NavTab::Album, b, webAlbumSendScript);
 }
 
 static void handleApiConfigGet() {

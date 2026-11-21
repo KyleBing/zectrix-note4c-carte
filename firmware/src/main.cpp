@@ -35,6 +35,7 @@
 #include "app_version.h"
 #include "app_errorlog.h"
 #include "app_gfx_icon.h"
+#include "app_splash.h"
 
 static EpdSsd2683 epd;
 static AppId g_app = AppId::Todo;
@@ -155,6 +156,7 @@ static void drawConfigWebPage(bool ok) {
   }
 
   constexpr int kGap = 3;
+  constexpr int kAfterBanner = 10;  // 黑块与下方内容
   constexpr int kMaxY = Theme::FooterY - 4;
   constexpr int kPad = 8;
   constexpr int kBannerShiftX = 30;  // 图标+文案整体右移
@@ -178,9 +180,9 @@ static void drawConfigWebPage(bool ok) {
                            Theme::HeaderBg);
   snprintf(line, sizeof(line), "地址：%s", webUrl());
   fontDrawTextWrapped(epd, tx, ty, tw, banner_y + banner_h, line, Theme::HeaderFg, Theme::HeaderBg);
-  int y = banner_y + banner_h + kGap;
+  int y = banner_y + banner_h + kAfterBanner;
   if (ap) {
-    // 热点 / 密码：黄底黑框居中，标签等宽对齐
+    // 热点 / 密码：黄底黑框居中，标签等宽对齐；上下各 10px
     const int lh = fontLineHeight();
     constexpr int kBoxPadX = 14;
     constexpr int kBoxPadY = 8;
@@ -205,7 +207,7 @@ static void drawConfigWebPage(bool ok) {
     fontDrawTextWrapped(epd, text_x, row_y, label_w, row_y + lh, "密码", Theme::Fg, Theme::Accent);
     fontDrawTextWrapped(epd, text_x + label_w + kLabelGap, row_y, val_w + 4, row_y + lh, WIFI_AP_PASS,
                         Theme::Fg, Theme::Accent);
-    y = y + box_h + kGap + 2;
+    y = y + box_h + kAfterBanner;
     y = fontDrawTextWrapped(epd, 8, y, 384, kMaxY, "手机连此热点后，用浏览器打开上面的地址", Theme::Fg) +
         kGap;
   } else {
@@ -218,11 +220,15 @@ static void drawConfigWebPage(bool ok) {
       kGap;
   y = fontDrawTextWrapped(epd, 8, y, 384, kMaxY, "BOOT 键：退出配置，返回应用", Theme::Fg) + kGap;
   y = fontDrawTextWrapped(epd, 8, y, 384, kMaxY, "长按下键约 3 秒：关机；再按下键开机", Theme::Fg) + kGap;
-  const uint32_t idle = getAppConfig().idle_off_sec;
+  const AppConfig &pcfg = getAppConfig();
+  const uint32_t idle = pcfg.idle_off_sec;
   if (idle == 0) {
     fontDrawTextWrapped(epd, 8, y, 384, kMaxY, "无操作自动关机：关闭（配置页期间不会关）", Theme::Fg);
+  } else if (pcfg.idle_off_on_power) {
+    snprintf(line, sizeof(line), "无操作 %u 秒后关机（接电也关；配置页不计）", (unsigned)idle);
+    fontDrawTextWrapped(epd, 8, y, 384, kMaxY, line, Theme::Fg);
   } else {
-    snprintf(line, sizeof(line), "无操作 %u 秒后关机（配置页期间不会关）", (unsigned)idle);
+    snprintf(line, sizeof(line), "无操作 %u 秒后关机（接电不关；配置页不计）", (unsigned)idle);
     fontDrawTextWrapped(epd, 8, y, 384, kMaxY, line, Theme::Fg);
   }
   epd.display();
@@ -325,7 +331,10 @@ void setup() {
     Serial.printf("[UI] disabled restore -> %s\n", appIdName(g_app));
   }
 
-  // 上电不刷屏（墨水屏保留上一帧）；快闪 3 下表示已开机
+  // 新固件刷入后首屏展示 LOGO/版本（每个 APP_BUILD 一次）；平时上电仍不刷屏
+  if (splashShowIfNeeded(epd)) {
+    Serial.printf("[UI] splash build=%d\n", APP_BUILD);
+  }
   ledBootFlash();
   powerIdleSetTimeoutSec(getAppConfig().idle_off_sec);
   suppressKeys(500);  // ignore boot bounce after power-on
@@ -378,6 +387,19 @@ void loop() {
     suppressKeys(80);
     busy = false;
   };
+
+  // 天气间隔自动刷新（配置页不计；需有效 RTC 时间）
+  if (!in_web && !busy && !boot && !up && weatherAutoRefreshDue()) {
+    busy = true;
+    ledSet(LedPattern::Breathe);
+    const AppId was = g_app;
+    g_app = AppId::Weather;
+    Serial.printf("[UI] weather auto-refresh (was %s, every %u s)\n", appIdName(was),
+                  (unsigned)getAppConfig().weather_refresh_sec);
+    const bool ok = showCurrentApp(false);
+    finishAction(ok);
+    return;
+  }
 
   if (in_web) {
     if (powerTakeBootClicksNow()) {

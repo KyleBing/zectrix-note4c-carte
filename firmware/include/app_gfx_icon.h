@@ -25,3 +25,9 @@ void wxIconDraw(EpdSsd2683 &epd, int x, int y, WxIcon id, int dst);
 
 // design/icon/ap_active.svg / lan_active.svg. skip_white=false keeps white on dark bg.
 void webModeIconDraw(EpdSsd2683 &epd, int x, int y, bool ap_mode, int dst, bool skip_white = true);
+
+// design/character/year.png / month.png (年 / 月). White is transparent.
+// Native source size is 24×24 (CHAR_ICON_SRC); dst<=0 draws at source size.
+static constexpr int kCharIconSize = 24;
+void charYearDraw(EpdSsd2683 &epd, int x, int y, int dst = 0);
+void charMonthDraw(EpdSsd2683 &epd, int x, int y, int dst = 0);

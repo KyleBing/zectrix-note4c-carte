@@ -50,3 +50,13 @@ void wxIconDraw(EpdSsd2683 &epd, int x, int y, WxIcon id, int dst) {
 void webModeIconDraw(EpdSsd2683 &epd, int x, int y, bool ap_mode, int dst, bool skip_white) {
   blit2bpp(epd, x, y, ap_mode ? kWebAp : kWebLan, WEB_ICON_SRC, dst, skip_white);
 }
+
+void charYearDraw(EpdSsd2683 &epd, int x, int y, int dst) {
+  if (dst <= 0) dst = CHAR_ICON_SRC;
+  blit2bpp(epd, x, y, kCharYear, CHAR_ICON_SRC, dst, true);
+}
+
+void charMonthDraw(EpdSsd2683 &epd, int x, int y, int dst) {
+  if (dst <= 0) dst = CHAR_ICON_SRC;
+  blit2bpp(epd, x, y, kCharMonth, CHAR_ICON_SRC, dst, true);
+}

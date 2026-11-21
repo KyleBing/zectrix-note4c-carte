@@ -19,6 +19,8 @@ struct BatteryStatus {
 void batteryBegin();
 BatteryStatus batteryRead();
 const char *batteryChargeLabel(BatteryCharge c);
+// 充电中或已充满（通常表示 USB/电源已接入）
+bool batteryOnPower();
 
 // Header battery icon only (no percent text) on black bar, right-aligned.
 // Returns leftmost x used (so callers can avoid overlap).

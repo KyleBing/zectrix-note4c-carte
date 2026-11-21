@@ -3,6 +3,7 @@
 
 #include <Preferences.h>
 #include <ArduinoJson.h>
+#include <ctime>
 #include <cstring>
 
 static AppConfig g_cfg{};
@@ -11,10 +12,12 @@ static Preferences g_prefs;
 static void clearConfig() {
   memset(&g_cfg, 0, sizeof(g_cfg));
   strncpy(g_cfg.portal_base_url, "https://kylebing.cn/portal", sizeof(g_cfg.portal_base_url) - 1);
+  g_cfg.idle_off_on_power = false;
   g_cfg.album_show_header = true;
   g_cfg.week_start_monday = true;
   g_cfg.tz_offset_min = 480;  // UTC+8
   g_cfg.ntp_interval_days = 30;
+  g_cfg.weather_refresh_sec = 0;
   g_cfg.apps_enabled = appsEnabledDefaultMask();
 }
 
@@ -93,6 +96,15 @@ bool loadUiSession(uint8_t &app_id, uint8_t &weather_mode, int &album_index) {
   weather_mode = g_prefs.getUChar("ui_wx", 0);
   album_index = g_prefs.getInt("ui_alb", 0);
   return true;
+}
+
+int loadSplashBuild() {
+  if (!g_prefs.isKey("splash_b")) return -1;
+  return g_prefs.getInt("splash_b", -1);
+}
+
+void saveSplashBuild(int build) {
+  g_prefs.putInt("splash_b", build);
 }
 
 bool upsertAppConfigWifi(const char *ssid, const char *password, bool set_active) {
@@ -227,6 +239,11 @@ bool saveIdleOffSec(uint32_t sec) {
   return saveAppConfig();
 }
 
+bool saveIdleOffOnPower(bool on) {
+  g_cfg.idle_off_on_power = on;
+  return saveAppConfig();
+}
+
 bool saveAlbumShowHeader(bool show) {
   g_cfg.album_show_header = show;
   return saveAppConfig();
@@ -279,6 +296,57 @@ bool qweatherConfigured() {
          g_cfg.portal_base_url[0];
 }
 
+static constexpr uint32_t kWeatherRefreshMinSec = 60;
+static constexpr uint32_t kWeatherRefreshMaxSec = 365UL * 86400UL;
+
+uint32_t weatherRefreshSecFromDhm(uint32_t days, uint32_t hours, uint32_t minutes) {
+  if (hours > 23) hours = 23;
+  if (minutes > 59) minutes = 59;
+  if (days > 365) days = 365;
+  const uint64_t sec =
+      (uint64_t)days * 86400ULL + (uint64_t)hours * 3600ULL + (uint64_t)minutes * 60ULL;
+  if (sec == 0) return 0;
+  if (sec < kWeatherRefreshMinSec) return kWeatherRefreshMinSec;
+  if (sec > kWeatherRefreshMaxSec) return kWeatherRefreshMaxSec;
+  return (uint32_t)sec;
+}
+
+void weatherRefreshToDhm(uint32_t sec, uint32_t &days, uint32_t &hours, uint32_t &minutes) {
+  days = sec / 86400UL;
+  sec %= 86400UL;
+  hours = sec / 3600UL;
+  sec %= 3600UL;
+  minutes = sec / 60UL;
+}
+
+bool saveWeatherRefreshSec(uint32_t sec) {
+  if (sec != 0) {
+    if (sec < kWeatherRefreshMinSec) sec = kWeatherRefreshMinSec;
+    if (sec > kWeatherRefreshMaxSec) sec = kWeatherRefreshMaxSec;
+  }
+  g_cfg.weather_refresh_sec = sec;
+  return saveAppConfig();
+}
+
+uint32_t loadWeatherLastUnix() {
+  if (!g_prefs.isKey("wx_last")) return 0;
+  return g_prefs.getUInt("wx_last", 0);
+}
+
+void saveWeatherLastUnix(uint32_t unix_sec) { g_prefs.putUInt("wx_last", unix_sec); }
+
+bool weatherAutoRefreshDue() {
+  const uint32_t iv = g_cfg.weather_refresh_sec;
+  if (iv < kWeatherRefreshMinSec) return false;
+  if (!qweatherConfigured()) return false;
+  if (!appIdEnabled(AppId::Weather)) return false;
+  const time_t now = time(nullptr);
+  if (now < 1700000000) return false;  // 无有效时间则不瞎刷
+  const uint32_t last = loadWeatherLastUnix();
+  if (last == 0) return false;  // 尚未成功刷过：等用户先手动打开一次天气
+  return (uint32_t)now >= last + iv;
+}
+
 String appConfigToJson(bool mask_secrets) {
   JsonDocument doc;
   JsonArray wifis = doc["wifis"].to<JsonArray>();
@@ -316,7 +384,9 @@ String appConfigToJson(bool mask_secrets) {
   }
   qw["location_id"] = g_cfg.qweather_location_id;
   qw["location_name"] = g_cfg.qweather_location_name;
+  qw["refresh_sec"] = g_cfg.weather_refresh_sec;
   doc["idle_off_sec"] = g_cfg.idle_off_sec;
+  doc["idle_off_on_power"] = g_cfg.idle_off_on_power;
   doc["album_show_header"] = g_cfg.album_show_header;
   doc["week_start_monday"] = g_cfg.week_start_monday;
   doc["tz_offset_min"] = g_cfg.tz_offset_min;
@@ -384,9 +454,26 @@ bool appConfigFromJson(const char *json) {
     strncpy(g_cfg.qweather_location_id, qw["location_id"] | "", sizeof(g_cfg.qweather_location_id) - 1);
     strncpy(g_cfg.qweather_location_name, qw["location_name"] | "",
             sizeof(g_cfg.qweather_location_name) - 1);
+    if (qw["refresh_sec"].is<uint32_t>() || qw["refresh_sec"].is<int>()) {
+      uint32_t sec = (uint32_t)(qw["refresh_sec"] | 0);
+      if (sec != 0) {
+        if (sec < 60) sec = 60;
+        if (sec > 365UL * 86400UL) sec = 365UL * 86400UL;
+      }
+      g_cfg.weather_refresh_sec = sec;
+    } else {
+      g_cfg.weather_refresh_sec = 0;
+    }
+  } else {
+    g_cfg.weather_refresh_sec = 0;
   }
 
   g_cfg.idle_off_sec = doc["idle_off_sec"] | 0;
+  if (doc["idle_off_on_power"].is<bool>()) {
+    g_cfg.idle_off_on_power = doc["idle_off_on_power"].as<bool>();
+  } else {
+    g_cfg.idle_off_on_power = false;
+  }
   if (doc["album_show_header"].is<bool>()) {
     g_cfg.album_show_header = doc["album_show_header"].as<bool>();
   } else {

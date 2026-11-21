@@ -18,7 +18,7 @@ void webAlbumAppendPage(String &b) {
       "<div class=ed-toolbar>"
       "<div class=ed-tool-main>"
       "<label class=file-pick>"
-      "<span class=file-cta><input type=file id=pick accept='image/*'>选取图片</span>"
+      "<span class=file-cta><input type=file id=pick accept='image/*,.2bp,application/octet-stream'>选取图片 / .2bp</span>"
       "<span class='file-name empty' id=fileName>未选择文件</span>"
       "</label>"
       "<div class=ed-sep></div>"
@@ -106,7 +106,7 @@ void webAlbumAppendPage(String &b) {
       "<em id=tolV>36</em>"
       "</div>"
       "</div>"
-      "<p class=hint ed-map-hint>先点中间原色，再在左图上取色，或点两侧衍生色，就把该颜色替换成这个原色。点连线可改容差；选中后 Backspace / Delete 删除。左列偏暗，右列偏亮。</p>"
+      "<p class=hint ed-map-hint>先点中间原色，再在左图上取色，或点两侧衍生色，就把该颜色替换成这个原色。点连线可改容差；选中后 Backspace / Delete 删除；Ctrl/⌘+Z 撤销。左列偏暗，右列偏亮。</p>"
       "<div id=rules class=rules></div>"
       "</div></div>"
       "<aside class=ed-side>"
@@ -165,14 +165,30 @@ void webAlbumAppendPage(String &b) {
          "<p class=hdr-hint>墨水屏相册页顶部是否叠「相册」标题条；关掉可多露出一点画面。</p>"
          "<div id=list class=ed-saved>加载中…</div>"
          "</div></div>");
+}
 
-  b += R"ALBUMJS(<script>
+void webAlbumSendScript(WebServer &server) {
+  // Keep JS out of Arduino String — album page is ~40KB and used to OOM into a blank page.
+  static const char kJs[] = R"ALBUMJS(<script>
 const W=400,H=300,FRAME=30000;
-const PAL=[[0,0,0],[255,255,255],[246,199,73],[112,27,14]];
+const PAL=[[0,0,0],[255,255,255],[246,199,73],[139,32,16]];
 const PN=['黑','白','黄','红'];
 function $(id){return document.getElementById(id)}
 function val(id){return +$(id).value}
 let img=null,packed=null,rules=[],mapTo=-1,selRule=-1,cover=true,tool='pan',grain=true;
+let rulesHist=[],RULES_HIST_MAX=40;
+function cloneRulesState(){return {rules:JSON.parse(JSON.stringify(rules)),selRule:selRule};}
+function pushRulesHist(){
+  rulesHist.push(cloneRulesState());
+  if(rulesHist.length>RULES_HIST_MAX) rulesHist.shift();
+}
+function undoRules(){
+  if(!rulesHist.length){toast('没有可撤销');return;}
+  const s=rulesHist.pop();
+  rules=s.rules;selRule=s.selRule;
+  if(selRule>=rules.length) selRule=-1;
+  renderRules();schedule(true);toast('已撤销');
+}
 let mixList=[],mixSplit=128;
 let drag=false,lx=0,ly=0,tmr=null,adjRgb=null,rawLum=null;
 let baseIdx=null,paint=new Int8Array(W*H);
@@ -675,12 +691,15 @@ function addOrSelectRule(r,g,b,mix){
   });
   if(found>=0){
     const prev=rules[found].to;
+    if(prev===mapTo){selRule=found;renderRules();return;}
+    pushRulesHist();
     rules[found].to=mapTo;
     selRule=found;
     renderRules();
-    if(prev!==mapTo) schedule(true);
+    schedule(true);
     return;
   }
+  pushRulesHist();
   rules.push({r:r,g:g,b:b,tol:val('tol'),to:mapTo,mix:typeof mix==='number'?mix:-1});
   selRule=rules.length-1;
   renderRules();
@@ -886,9 +905,16 @@ window.addEventListener('keydown',function(e){
     if(!spaceHeld){spaceHeld=true;syncCursor();}
     return;
   }
+  if((e.ctrlKey||e.metaKey)&&(e.key==='z'||e.key==='Z')&&!e.shiftKey){
+    if(typingTarget(e.target)) return;
+    e.preventDefault();
+    undoRules();
+    return;
+  }
   if((e.key==='Backspace'||e.key==='Delete')&&selRule>=0){
     if(typingTarget(e.target)) return;
     e.preventDefault();
+    pushRulesHist();
     rules.splice(selRule,1);
     selRule=-1;
     renderRules();
@@ -907,6 +933,18 @@ function histX(e){
   const r=$('hist').getBoundingClientRect();
   return Math.max(0,Math.min(255,Math.round((e.clientX-r.left)*255/r.width)));
 }
+function endHistDrag(e){
+  if(histDrag<0) return;
+  histDrag=-1;
+  if(e&&e.pointerId!=null){
+    try{$('hist').releasePointerCapture(e.pointerId);}catch(err){}
+  }
+  schedule(true);
+}
+function histPointerOutside(e){
+  const r=$('hist').getBoundingClientRect();
+  return e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom;
+}
 $('hist').onpointerdown=function(e){
   $('hist').setPointerCapture(e.pointerId);
   const x=histX(e);
@@ -917,13 +955,17 @@ $('hist').onpointerdown=function(e){
 };
 $('hist').onpointermove=function(e){
   if(histDrag<0) return;
+  // 拖出色阶区域：取消按下
+  if(histPointerOutside(e)){endHistDrag(e);return;}
   let x=histX(e);
   if(histDrag===0){blk=Math.min(x,mid-1); if(blk<0) blk=0;}
   if(histDrag===1){mid=Math.max(blk+1,Math.min(wht-1,x));}
   if(histDrag===2){wht=Math.max(x,mid+1); if(wht>255) wht=255;}
   setEm();drawHist();schedule(false);
 };
-$('hist').onpointerup=function(){if(histDrag>=0){histDrag=-1;schedule(true);}};
+$('hist').onpointerup=function(e){endHistDrag(e);};
+$('hist').onpointercancel=function(e){endHistDrag(e);};
+$('hist').onpointerleave=function(e){if(histDrag>=0) endHistDrag(e);};
 $('hist').onkeydown=function(e){
   const d=(e.key==='ArrowRight'||e.key==='ArrowUp')?1:((e.key==='ArrowLeft'||e.key==='ArrowDown')?-1:0);
   if(!d) return;
@@ -1040,7 +1082,7 @@ function resetSide(){
 }
 $('btnReset').onclick=function(){resetView();schedule(true);};
 $('btnSideReset').onclick=function(){resetSide();schedule(true);};
-$('btnClearMaps').onclick=function(){rules=[];selRule=-1;renderRules();schedule(true);};
+$('btnClearMaps').onclick=function(){if(!rules.length)return;pushRulesHist();rules=[];selRule=-1;renderRules();schedule(true);};
 for(let i=0;i<4;i++) $('map'+i).onclick=function(){setMapTo(+this.id.slice(3));};
 for(let i=0;i<4;i++) $('br'+i).onclick=function(){setBrushCol(+this.id.slice(2));setTool('brush');};
 for(let i=0;i<4;i++) $('flt'+i).onclick=function(){setVisCol(+this.id.slice(3));};
@@ -1052,9 +1094,52 @@ function loadImage(im,name,isSaved){
   fn.textContent=name+(im.width?('  '+im.width+'×'+im.height):'');
   run(true);
 }
+// 无损载入设备帧：不经 PNG/抖动，像素与板上一致
+function loadFrom2bp(buf,name,isSaved){
+  if(buf.length!==FRAME) throw new Error('尺寸不对（需要 '+FRAME+' 字节 .2bp）');
+  const idx=decode2bp(buf);
+  baseIdx=idx;
+  paint=new Int8Array(W*H);
+  for(let i=0;i<paint.length;i++) paint[i]=-1;
+  packed=buf instanceof Uint8Array?new Uint8Array(buf):new Uint8Array(buf);
+  editName=isSaved?name:'';
+  resetView();resetSide();
+  const c=idxToCanvas(idx);
+  const im=new Image();
+  im.onload=function(){
+    img=im;
+    $('src').getContext('2d').drawImage(im,0,0);
+    blitIdx(composedIdx());
+    drawInkHist(composedIdx());
+    const fn=$('fileName');
+    fn.classList.remove('empty');
+    fn.textContent=(name||'frame.2bp')+'  400×300 · 无损';
+    $('btnUpload').disabled=false;
+    $('btnSaveAs').disabled=false;
+    $('btnUpload').textContent=editName?'覆盖':'上传';
+    $('convInfo').textContent='已载入 .2bp'+(editName?(' '+editName):'')+'（未重新抖动）';
+    toast('已载入 .2bp');
+  };
+  im.src=c.toDataURL('image/png');
+}
 $('pick').onchange=function(){
   const f=this.files[0];
   if(!f) return;
+  const is2bp=/\.2bp$/i.test(f.name)||f.type==='application/octet-stream';
+  if(is2bp||f.size===FRAME){
+    const rd=new FileReader();
+    rd.onload=function(){
+      try{
+        loadFrom2bp(new Uint8Array(rd.result),f.name,/\.2bp$/i.test(f.name));
+      }catch(e){
+        $('fileName').textContent=String(e);
+        toast(String(e),true);
+      }
+    };
+    rd.onerror=function(){$('fileName').textContent='读取失败';};
+    rd.readAsArrayBuffer(f);
+    return;
+  }
   const url=URL.createObjectURL(f);
   const im=new Image();
   im.onload=function(){URL.revokeObjectURL(url);loadImage(im,f.name,false);};
@@ -1088,7 +1173,7 @@ function idxToCanvas(idx){
 function idxToImage(idx,cb){
   const im=new Image();
   im.onload=function(){cb(im);};
-  im.src=idxToCanvas(idx).toDataURL();
+  im.src=idxToCanvas(idx).toDataURL('image/png');
 }
 function saveBlob(blob,filename){
   const a=document.createElement('a');
@@ -1100,15 +1185,14 @@ async function downloadSaved(name){
   const resp=await fetch('/album/file?name='+encodeURIComponent(name));
   const buf=new Uint8Array(await resp.arrayBuffer());
   if(buf.length!==FRAME) throw new Error('尺寸不对');
-  idxToCanvas(decode2bp(buf)).toBlob(function(blob){
-    saveBlob(blob, name.replace(/\.2bp$/i,'.png'));
-  },'image/png');
+  // 导出原始 .2bp（四色索引帧），避免 PNG 往返变色
+  const fname=/\.2bp$/i.test(name)?name:(name+'.2bp');
+  saveBlob(new Blob([buf],{type:'application/octet-stream'}),fname);
 }
 async function loadSaved(name){
   const resp=await fetch('/album/file?name='+encodeURIComponent(name));
   const buf=new Uint8Array(await resp.arrayBuffer());
-  if(buf.length!==FRAME) throw new Error('尺寸不对');
-  idxToImage(decode2bp(buf),function(im){loadImage(im,name,true);});
+  loadFrom2bp(buf,name,true);
 }
 async function sendPacked(overwrite){
   if(!packed) return;
@@ -1159,14 +1243,14 @@ async function refreshList(){
         +'<label class=show-lab><input type=checkbox data-show="'+n+'"'+(show?' checked':'')+'>展示</label>'
         +'<code>'+n+'</code></div>'
         +'<div class="row acts">'
-        +'<button type=button class=secondary data-dl="'+n+'">下载</button>'
+        +'<button type=button class=secondary data-dl="'+n+'" title="下载无损 .2bp">下载 .2bp</button>'
         +'<button type=button class=secondary data-edit="'+n+'">编辑</button>'
         +'<button type=button class=danger data-del="'+n+'">删</button></div></div>';
     }).join('');
     el.querySelectorAll('[data-dl]').forEach(function(btn){
       btn.onclick=function(ev){
         ev.stopPropagation();
-        downloadSaved(btn.dataset.dl).then(function(){toast('已开始下载');})
+        downloadSaved(btn.dataset.dl).then(function(){toast('已下载 .2bp');})
           .catch(function(e){$('convInfo').textContent=e;toast(String(e),true);});
       };
     });
@@ -1224,6 +1308,19 @@ panHold.type='hidden';panHold.id='panx';panHold.value='0';
 const panHoldY=document.createElement('input');
 panHoldY.type='hidden';panHoldY.id='pany';panHoldY.value='0';
 document.body.appendChild(panHold);document.body.appendChild(panHoldY);
+(function(){
+  const tolEl=$('tol');
+  if(!tolEl) return;
+  let tolPushed=false;
+  tolEl.addEventListener('pointerdown',function(){
+    if(selRule>=0&&rules[selRule]){pushRulesHist();tolPushed=true;}
+  });
+  tolEl.addEventListener('pointerup',function(){tolPushed=false;});
+  tolEl.addEventListener('change',function(){
+    if(!tolPushed&&selRule>=0&&rules[selRule]) pushRulesHist();
+    tolPushed=false;
+  });
+})();
 $('showHeader').onchange=async function(){
   const show=this.checked?1:0;
   await fetch('/album/header?show='+show,{method:'POST'});
@@ -1245,7 +1342,10 @@ buildMixes();
 window.addEventListener('resize',function(){requestAnimationFrame(drawWires);});
 setTool('pan');setBrushCol(0);setEm();renderRules();drawHist();drawInkHist();refreshList();
 </script>)ALBUMJS";
+  server.sendContent(kJs, sizeof(kJs) - 1);
 }
+
+
 
 static void handleAlbumList() {
   AlbumList list;

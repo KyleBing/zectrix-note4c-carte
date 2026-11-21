@@ -76,6 +76,11 @@ const char *batteryChargeLabel(BatteryCharge c) {
   }
 }
 
+bool batteryOnPower() {
+  const BatteryStatus s = batteryRead();
+  return s.ok && s.charge != BatteryCharge::Discharging;
+}
+
 // Same constants / layout as Cardputer app_icons.cpp drawIconBattery.
 static constexpr int kSegs = 5;
 static constexpr int kSegW = 3;

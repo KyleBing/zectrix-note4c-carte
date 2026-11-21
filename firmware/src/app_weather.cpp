@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <memory>
 
 static const char *kRenewHeader = "X-Access-Token";
@@ -1072,6 +1073,7 @@ bool weatherShowMode(EpdSsd2683 &epd, WeatherMode mode) {
     return true;  // UI 已按 mode 刷新；BOOT 切换应看到标题变化，勿 ErrorBurst
   }
 
+  bool fetched_ok = false;
   switch (mode) {
     case WeatherMode::Hour12:
     case WeatherMode::Now: {
@@ -1084,19 +1086,26 @@ bool weatherShowMode(EpdSsd2683 &epd, WeatherMode mode) {
         errorLog("weather",
                  g_hourly_buf.message.length() ? g_hourly_buf.message : "hourly fetch failed");
       }
+      fetched_ok = ok_now || ok_h;
       const char *st = (!ok_now || !ok_h) ? "err" : "OK";
       weatherDrawNow(epd, g_now_buf, g_hourly_buf, st);
-      return true;
+      break;
     }
     case WeatherMode::Week14:
     case WeatherMode::Week7: {
       const bool ok = weatherFetchDaily("7d", g_daily_buf);
       if (!ok) errorLog("weather", g_daily_buf.message.length() ? g_daily_buf.message : "daily 7d failed");
+      fetched_ok = ok;
       weatherDrawForecast(epd, g_daily_buf, WeatherMode::Week7, ok ? "OK" : "err");
-      return true;
+      break;
     }
     default:
       errorLog("weather", "unknown weather mode");
       return false;
   }
+  if (fetched_ok) {
+    const time_t now = time(nullptr);
+    if (now >= 1700000000) saveWeatherLastUnix((uint32_t)now);
+  }
+  return true;
 }

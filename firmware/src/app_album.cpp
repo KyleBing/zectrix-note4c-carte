@@ -149,10 +149,10 @@ bool albumList(AlbumList &out) {
   }
   dir.close();
   if (out.count > 1) {
-    // sort by name; keep shown[] aligned via temp
+    // 新图优先：按文件名降序（更高编号在前）；keep shown[] aligned
     for (int i = 0; i < out.count - 1; i++) {
       for (int j = i + 1; j < out.count; j++) {
-        if (strcmp(out.names[i], out.names[j]) > 0) {
+        if (strcmp(out.names[i], out.names[j]) < 0) {
           char tmp[24];
           memcpy(tmp, out.names[i], 24);
           memcpy(out.names[i], out.names[j], 24);
@@ -196,6 +196,19 @@ bool albumNextFileName(char *out_name, size_t out_len) {
   AlbumList list;
   albumList(list);
   if (list.count >= ALBUM_MAX) return false;
+
+  // Prefer max+1 so the new file sorts to the front (desc by name).
+  int max_n = 0;
+  for (int i = 0; i < list.count; i++) {
+    int n = 0;
+    if (sscanf(list.names[i], "%d", &n) == 1 && n > max_n) max_n = n;
+  }
+  if (max_n < ALBUM_MAX) {
+    snprintf(out_name, out_len, "%03d.2bp", max_n + 1);
+    return true;
+  }
+
+  // Fallback: fill gaps (e.g. max already ALBUM_MAX but some deleted).
   for (int n = 1; n <= ALBUM_MAX; n++) {
     char cand[16];
     snprintf(cand, sizeof(cand), "%03d.2bp", n);

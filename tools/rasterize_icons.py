@@ -15,6 +15,7 @@ CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 
 WX_SRC = 90
 WEB_SRC = 50
+CHAR_SRC = 24  # design/character/*.png (年 / 月)
 
 
 def nearest(r: int, g: int, b: int, a: int) -> int | None:
@@ -110,9 +111,15 @@ def pack_row(pixels: list[int], *, pad_color: int = 1) -> list[int]:
     return out
 
 
-def bitmap_from_png(png: Path, size: int, *, black_bg: bool = False) -> list[int]:
+def bitmap_from_png(
+    png: Path, size: int, *, black_bg: bool = False, exact: bool = False
+) -> list[int]:
     im = Image.open(png).convert("RGBA")
-    im = crop_to_content(im, size, black_bg=black_bg)
+    if exact:
+        if im.size != (size, size):
+            raise ValueError(f"{png}: expected {size}x{size}, got {im.size}")
+    else:
+        im = crop_to_content(im, size, black_bg=black_bg)
     pad = 0 if black_bg else 1
     rows: list[int] = []
     for y in range(size):
@@ -153,6 +160,12 @@ WEB = [
     ("lan", "Lan"),
 ]
 
+# Already-PNG glyphs (black on transparent); no Chrome pass.
+CHARS = [
+    ("year", "Year"),
+    ("month", "Month"),
+]
+
 
 def main() -> None:
     with tempfile.TemporaryDirectory() as td:
@@ -165,6 +178,7 @@ def main() -> None:
             "",
             f"static constexpr int WX_ICON_SRC = {WX_SRC};",
             f"static constexpr int WEB_ICON_SRC = {WEB_SRC};",
+            f"static constexpr int CHAR_ICON_SRC = {CHAR_SRC};",
             "",
         ]
         wx_names = []
@@ -190,6 +204,13 @@ def main() -> None:
             chrome_png(svg, WEB_SRC, png, tdir, black_bg=True)
             data = bitmap_from_png(png, WEB_SRC, black_bg=True)
             parts.append(c_array(f"kWeb{ident}", data))
+            parts.append("")
+
+        # Pixel-art glyphs: keep 1:1, no crop/scale.
+        for slug, ident in CHARS:
+            png = ROOT / "design" / "character" / f"{slug}.png"
+            data = bitmap_from_png(png, CHAR_SRC, exact=True)
+            parts.append(c_array(f"kChar{ident}", data))
             parts.append("")
 
         OUT.write_text("\n".join(parts) + "\n", encoding="utf-8")

@@ -1,4 +1,6 @@
 #include "app_power.h"
+#include "app_battery.h"
+#include "app_config.h"
 #include "board.h"
 #include "app_led.h"
 
@@ -122,6 +124,8 @@ uint32_t powerIdleTimeoutSec() { return g_idle_sec; }
 
 void powerIdlePoll(bool inhibit) {
   if (inhibit || g_idle_sec == 0) return;
+  // 接电源时：仅当设置允许「连接电源时仍自动关机」才继续
+  if (!getAppConfig().idle_off_on_power && batteryOnPower()) return;
   if (millis() - g_idle_since >= g_idle_sec * 1000UL) {
     Serial.printf("[PWR] idle %u s -> off\n", (unsigned)g_idle_sec);
     powerOffNow();

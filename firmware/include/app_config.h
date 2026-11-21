@@ -31,6 +31,7 @@ struct AppConfig {
   char diary_id[DIARY_ID_MAX];
 
   uint32_t idle_off_sec;  // 无操作自动关机秒数；0=关闭。Web 配置期间不关
+  bool idle_off_on_power; // 连接电源（充电/充满）时是否仍执行空闲关机；默认 false
   bool album_show_header; // 设备相册展示时是否叠标题栏；默认 true
   bool week_start_monday; // 日历一周起始：true=周一，false=周日；默认 true
   int16_t tz_offset_min;  // 时区相对 UTC 分钟数；默认 480（UTC+8）
@@ -44,6 +45,7 @@ struct AppConfig {
   char qweather_key[QW_KEY_MAX];
   char qweather_location_id[QW_LOC_ID_MAX];
   char qweather_location_name[QW_LOC_NAME_MAX];
+  uint32_t weather_refresh_sec;  // 自动刷新间隔秒；0=关闭；开启时至少 60
 
   bool loaded;
 };
@@ -64,7 +66,16 @@ bool saveDiaryId(const char *id);
 bool saveQWeatherConfig(bool enabled, const char *host, const char *key, const char *loc_id,
                         const char *loc_name);
 bool qweatherConfigured();
+// 0 = 关闭；非 0 时钳到 [60, 365 天]
+bool saveWeatherRefreshSec(uint32_t sec);
+uint32_t weatherRefreshSecFromDhm(uint32_t days, uint32_t hours, uint32_t minutes);
+void weatherRefreshToDhm(uint32_t sec, uint32_t &days, uint32_t &hours, uint32_t &minutes);
+// 上次成功刷新的 unix 秒（NVS）；0 = 未知
+uint32_t loadWeatherLastUnix();
+void saveWeatherLastUnix(uint32_t unix_sec);
+bool weatherAutoRefreshDue();  // 配置了间隔且已到期（需有效系统时间）
 bool saveIdleOffSec(uint32_t sec);
+bool saveIdleOffOnPower(bool on);
 bool saveAlbumShowHeader(bool show);
 bool saveWeekStartMonday(bool monday);
 bool saveTimezoneOffsetMin(int16_t minutes);
@@ -81,3 +92,7 @@ bool hasSavedWifiConfig();
 // Last App / weather mode / album index — survive reboot (BOOT/WDT 等)
 void saveUiSession(uint8_t app_id, uint8_t weather_mode, int album_index);
 bool loadUiSession(uint8_t &app_id, uint8_t &weather_mode, int &album_index);
+
+// 刷机首屏：已展示过的 APP_BUILD；未见过则返回 -1
+int loadSplashBuild();
+void saveSplashBuild(int build);
