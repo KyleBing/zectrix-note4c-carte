@@ -86,18 +86,15 @@ void webAlbumAppendPage(String &b) {
       "<div class=ed-maps>"
       "<div class=ed-map-bar>"
       "<button type=button id=btnPick class=secondary>取色</button>"
-      "<button type=button id=btnClearMaps class=secondary>清空连线</button>"
+      "<button type=button id=btnClearMaps class=secondary>清空绑定</button>"
       "</div>"
       "<div class=ed-map-body>"
-      "<div class=ed-wire id=wireWrap>"
-      "<div id=mixL class='mix-col side-l'></div>"
-      "<div class=ed-inks id=mapPal>"
-      "<button type=button id=map0 class=pal-k title=黑 aria-label=黑></button>"
-      "<button type=button id=map1 class=pal-w title=白 aria-label=白></button>"
-      "<button type=button id=map2 class=pal-y title=黄 aria-label=黄></button>"
-      "<button type=button id=map3 class=pal-r title=红 aria-label=红></button>"
-      "</div>"
-      "<div id=mixR class='mix-col side-r'></div>"
+      "<div class=ed-cmap id=wireWrap>"
+      "<div class='ed-cmap-edge e-t'>黄</div>"
+      "<div class='ed-cmap-edge e-b'>红</div>"
+      "<div class='ed-cmap-edge e-l'>黑</div>"
+      "<div class='ed-cmap-edge e-r'>白</div>"
+      "<div class=ed-cmap-plot id=cmapPlot></div>"
       "<svg id=wires class=ed-wires></svg>"
       "</div>"
       "<div id=tolPop class=tol-pop>"
@@ -106,7 +103,7 @@ void webAlbumAppendPage(String &b) {
       "<em id=tolV>36</em>"
       "</div>"
       "</div>"
-      "<p class=hint ed-map-hint>先点中间原色，再在左图上取色，或点两侧衍生色，就把该颜色替换成这个原色。点连线可改容差；选中后 Backspace / Delete 删除；Ctrl/⌘+Z 撤销。左列偏暗，右列偏亮。</p>"
+      "<p class=hint ed-map-hint>色盘上是全部原始色（4 份墨水组合，共 35 色；左黑 / 右白 / 上黄 / 下红向中间过渡）。初始按最近原始色匹配照片。点某个原始色后再在左图取色，把照片颜色绑定到该原始色；圆点是照片色。点绑定可改容差；Backspace / Delete 删除；Ctrl/⌘+Z 撤销。</p>"
       "<div id=rules class=rules></div>"
       "</div></div>"
       "<aside class=ed-side>"
@@ -147,7 +144,7 @@ void webAlbumAppendPage(String &b) {
       "</div>"
       "</div>"
       "</div>"
-      "<p class=hint ed-help>左图载入后一直是原图。调色、色块和颜色替换只改右图。点中间原色后，可在左图取色或点两侧衍生色来替换；点连线改容差。左列偏暗，右列偏亮。色块是不带颗粒的纯色块。空格+拖动平移。</p>"
+      "<p class=hint ed-help>左图载入后一直是原图。调色、色块和颜色绑定只改右图。色盘是原始色；初始自动就近匹配，再点原始色去左图取色绑定。色块是不带颗粒的纯色块。空格+拖动平移。</p>"
       "</aside>"
       "</div></div>"
       "<div id=toast class=ed-toast></div>"
@@ -189,7 +186,7 @@ function undoRules(){
   if(selRule>=rules.length) selRule=-1;
   renderRules();schedule(true);toast('已撤销');
 }
-let mixList=[],mixSplit=128;
+let mixList=[];
 let drag=false,lx=0,ly=0,tmr=null,adjRgb=null,rawLum=null;
 let baseIdx=null,paint=new Int8Array(W*H);
 let blk=0,mid=128,wht=255,outBlk=0,outWht=255,histDrag=-1,editName='',brushCol=0,loupeRight=false,visCol=-1;
@@ -368,6 +365,20 @@ function applyPixel(r,g,b){
   }
   return [r,g,b];
 }
+function nearestMixIdx(r,g,b){
+  let bi=0,bd=1e18;
+  for(let i=0;i<mixList.length;i++){
+    const p=mixRgb(mixList[i]);
+    const d=(r-p[0])*(r-p[0])+(g-p[1])*(g-p[1])+(b-p[2])*(b-p[2]);
+    if(d<bd){bd=d;bi=i;}
+  }
+  return bi;
+}
+function pureInkOf(cnt){
+  for(let i=0;i<4;i++) if(cnt[i]===4) return i;
+  return -1;
+}
+// 规则：照片色 → 原始色（mix 下标）；无规则则返回 -1，由 nearestMixIdx 决定
 function mapPixel(r,g,b){
   for(let i=0;i<rules.length;i++){
     const u=rules[i],tol=u.tol*u.tol*3;
@@ -509,35 +520,40 @@ function pack(dither){
   const src=drawSource();
   const d=src.data;
   adjRgb=new Uint8ClampedArray(W*H*3);
-  const buf=new Float32Array(W*H*3);
-  const forced=new Int8Array(W*H);
+  const mixIdx=new Uint16Array(W*H);
+  const qbuf=new Float32Array(W*H*3);
   for(let i=0,j=0,p=0;i<d.length;i+=4,j+=3,p++){
     adjRgb[j]=d[i];adjRgb[j+1]=d[i+1];adjRgb[j+2]=d[i+2];
     const rgb=applyPixel(d[i],d[i+1],d[i+2]);
-    forced[p]=mapPixel(d[i],d[i+1],d[i+2]);
-    buf[j]=rgb[0];buf[j+1]=rgb[1];buf[j+2]=rgb[2];
+    let mi=mapPixel(d[i],d[i+1],d[i+2]);
+    if(mi<0||mi>=mixList.length) mi=nearestMixIdx(rgb[0],rgb[1],rgb[2]);
+    mixIdx[p]=mi;
+    const mr=mixRgb(mixList[mi]);
+    qbuf[j]=mr[0];qbuf[j+1]=mr[1];qbuf[j+2]=mr[2];
   }
   const idx=new Uint8Array(W*H);
   for(let y=0;y<H;y++){
     for(let x=0;x<W;x++){
-      const o=(y*W+x)*3;
-      const f=forced[y*W+x];
-      if(f>=0){
-        idx[y*W+x]=f;
+      const p=y*W+x,o=p*3;
+      const cnt=mixList[mixIdx[p]];
+      const ink=pureInkOf(cnt);
+      if(ink>=0){
+        idx[p]=ink;
         continue;
       }
-      let r=buf[o],g=buf[o+1],b=buf[o+2];
+      let r=qbuf[o],g=qbuf[o+1],b=qbuf[o+2];
       const i=nearest(r,g,b);
-      idx[y*W+x]=i;
+      idx[p]=i;
       if(!dither||!grain) continue;
-      const p=PAL[i];
+      const pal=PAL[i];
       const fac=val('dith')/100;
-      const er=(r-p[0])*fac,eg=(g-p[1])*fac,eb=(b-p[2])*fac;
+      const er=(r-pal[0])*fac,eg=(g-pal[1])*fac,eb=(b-pal[2])*fac;
       const spread=function(dx,dy,fac){
         const xx=x+dx,yy=y+dy;
         if(xx<0||xx>=W||yy<0||yy>=H)return;
+        if(pureInkOf(mixList[mixIdx[yy*W+xx]])>=0)return;
         const t=(yy*W+xx)*3;
-        buf[t]+=er*fac;buf[t+1]+=eg*fac;buf[t+2]+=eb*fac;
+        qbuf[t]+=er*fac;qbuf[t+1]+=eg*fac;qbuf[t+2]+=eb*fac;
       };
       spread(1,0,7/16);spread(-1,1,3/16);spread(0,1,5/16);spread(1,1,1/16);
     }
@@ -577,33 +593,39 @@ function scheduleGeom(final){
 function mixLabel(cnt){
   const parts=[];
   for(let i=0;i<4;i++) if(cnt[i]) parts.push(PN[i]+'×'+cnt[i]);
-  return parts.join(' ');
+  return parts.join(' ')||'原始色';
 }
 function sameRgb(u,r,g,b){return u.r===r&&u.g===g&&u.b===b;}
-function ruleName(u){
-  if(u&&typeof u.mix==='number'&&u.mix>=0&&mixList[u.mix]) return mixLabel(mixList[u.mix]);
-  return '取色';
+function origName(mi){
+  if(mi<0||mi>=mixList.length) return '原始色';
+  const ink=pureInkOf(mixList[mi]);
+  if(ink>=0) return PN[ink];
+  return mixLabel(mixList[mi]);
 }
-function swatchHtml(rgb,label){
-  return '<i data-chip style="background:rgb('+rgb[0]+','+rgb[1]+','+rgb[2]+')"></i><span>'+label+'</span>';
+function mixPos(cnt){
+  // 左黑右白、上黄下红，向中心过渡
+  return {x:(cnt[1]-cnt[0])/4, y:(cnt[2]-cnt[3])/4};
 }
-function lumOf(rgb){return 0.299*rgb[0]+0.587*rgb[1]+0.114*rgb[2];}
-function mixHost(rgb){
-  return lumOf(rgb)<mixSplit ? $('mixL') : $('mixR');
+function posStyle(x,y,ox,oy){
+  ox=ox||0;oy=oy||0;
+  return 'left:calc('+(50+x*46)+'% + '+ox+'px);top:calc('+(50-y*46)+'% + '+oy+'px)';
+}
+function swatchEl(mi){
+  return document.querySelector('#cmapPlot [data-m="'+mi+'"]');
 }
 function paintMixes(){
-  document.querySelectorAll('#wireWrap [data-m]').forEach(function(btn){
+  document.querySelectorAll('#cmapPlot [data-m]').forEach(function(btn){
     const mi=+btn.dataset.m;
-    const hit=rules.findIndex(function(u){return u.mix===mi;});
+    const hit=rules.findIndex(function(u){return u.to===mi;});
     btn.classList.toggle('on', hit>=0);
-    btn.classList.toggle('sel', hit===selRule);
+    btn.classList.toggle('arm', mi===mapTo);
+    btn.classList.toggle('sel', selRule>=0&&rules[selRule]&&rules[selRule].to===mi);
   });
-  document.querySelectorAll('#wireWrap [data-c]').forEach(function(btn){
+  document.querySelectorAll('#cmapPlot [data-c]').forEach(function(btn){
     const i=+btn.dataset.c;
     btn.classList.toggle('on', true);
     btn.classList.toggle('sel', i===selRule);
   });
-  for(let k=0;k<4;k++) $('map'+k).classList.toggle('arm', k===mapTo);
 }
 function syncTolHeight(){
   const pop=$('tolPop'),wrap=$('wireWrap');
@@ -616,7 +638,9 @@ function syncTolPop(){
   if(selRule>=0&&rules[selRule]){
     const u=rules[selRule];
     $('tol').value=u.tol;
-    $('tolLab').textContent=PN[u.to]+' ← '+ruleName(u);
+    $('tolLab').textContent=origName(u.to)+' ← 照片';
+  }else if(mapTo>=0){
+    $('tolLab').textContent=origName(mapTo);
   }else{
     $('tolLab').textContent='容差';
   }
@@ -632,17 +656,14 @@ function drawWires(){
   svg.setAttribute('height',Math.max(1,wr.height));
   let html='';
   rules.forEach(function(u,i){
-    const ink=$('map'+u.to);
-    let tgt=null;
-    if(typeof u.mix==='number'&&u.mix>=0) tgt=document.querySelector('#wireWrap [data-m="'+u.mix+'"] [data-chip]');
-    else tgt=document.querySelector('#wireWrap [data-c="'+i+'"] [data-chip]');
-    if(!ink||!tgt) return;
-    const a=ink.getBoundingClientRect(),b=tgt.getBoundingClientRect();
-    const onLeft=!!tgt.closest('#mixL');
-    const x1=(onLeft?a.left:a.right)-wr.left,y1=a.top+a.height/2-wr.top;
-    const x2=(onLeft?b.right:b.left)-wr.left,y2=b.top+b.height/2-wr.top;
-    const p=PAL[u.to];
-    const col=(u.to===1)?'#888':'rgb('+p[0]+','+p[1]+','+p[2]+')';
+    const orig=swatchEl(u.to);
+    const chip=document.querySelector('#cmapPlot [data-c="'+i+'"]');
+    if(!orig||!chip) return;
+    const a=orig.getBoundingClientRect(),b=chip.getBoundingClientRect();
+    const x1=a.left+a.width/2-wr.left,y1=a.top+a.height/2-wr.top;
+    const x2=b.left+b.width/2-wr.left,y2=b.top+b.height/2-wr.top;
+    const p=mixRgb(mixList[u.to]);
+    const col='rgb('+p[0]+','+p[1]+','+p[2]+')';
     const w=i===selRule?3.6:2;
     html+='<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="transparent" stroke-width="14" data-line="'+i+'"/>';
     html+='<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+col+'" stroke-width="'+w+'" data-line="'+i+'"/>';
@@ -658,20 +679,24 @@ function drawWires(){
   });
 }
 function renderRules(){
-  document.querySelectorAll('#wireWrap [data-c]').forEach(function(el){el.remove();});
+  const plot=$('cmapPlot');
+  if(!plot) return;
+  document.querySelectorAll('#cmapPlot [data-c]').forEach(function(el){el.remove();});
+  const per={};
   rules.forEach(function(u,i){
-    if(typeof u.mix==='number'&&u.mix>=0) return;
     const btn=document.createElement('button');
     btn.type='button';
+    btn.className='sw-drop';
     btn.dataset.c=String(i);
-    btn.title='取色 ±'+u.tol;
     const rgb=[Math.round(u.r),Math.round(u.g),Math.round(u.b)];
-    btn.innerHTML=swatchHtml(rgb,'取色 '+rgb.join(','));
-    btn.onclick=function(){
-      if(mapTo<0){selectRule(i,true);return;}
-      addOrSelectRule(u.r,u.g,u.b,-1);
-    };
-    mixHost(rgb).appendChild(btn);
+    btn.title='照片 '+rgb.join(',')+' ±'+u.tol+' → '+origName(u.to);
+    const base=mixPos(mixList[u.to]||[1,1,1,1]);
+    const n=per[u.to]|0;per[u.to]=n+1;
+    const ang=n*0.9-0.4;
+    const ox=Math.cos(ang)*14,oy=Math.sin(ang)*14;
+    const ring=mixRgb(mixList[u.to]||[0,0,0,4]);
+    btn.style.cssText=posStyle(base.x,base.y,ox,oy)+';background:rgb('+rgb[0]+','+rgb[1]+','+rgb[2]+');border-color:rgb('+ring[0]+','+ring[1]+','+ring[2]+')';
+    plot.appendChild(btn);
   });
   paintMixes();
   syncTolPop();
@@ -682,13 +707,10 @@ function selectRule(i,force){
   if(selRule>=0 && rules[selRule]) mapTo=rules[selRule].to;
   renderRules();
 }
-function addOrSelectRule(r,g,b,mix){
-  if(mapTo<0||mapTo>3){toast('先点中间的原色');return;}
+function addOrSelectRule(r,g,b){
+  if(mapTo<0||mapTo>=mixList.length){toast('先点色盘上的原始颜色');return;}
   r=Math.round(r);g=Math.round(g);b=Math.round(b);
-  const found=rules.findIndex(function(u){
-    if(typeof mix==='number'&&mix>=0) return u.mix===mix;
-    return sameRgb(u,r,g,b);
-  });
+  const found=rules.findIndex(function(u){return sameRgb(u,r,g,b);});
   if(found>=0){
     const prev=rules[found].to;
     if(prev===mapTo){selRule=found;renderRules();return;}
@@ -700,7 +722,7 @@ function addOrSelectRule(r,g,b,mix){
     return;
   }
   pushRulesHist();
-  rules.push({r:r,g:g,b:b,tol:val('tol'),to:mapTo,mix:typeof mix==='number'?mix:-1});
+  rules.push({r:r,g:g,b:b,tol:val('tol'),to:mapTo});
   selRule=rules.length-1;
   renderRules();
   schedule(true);
@@ -710,7 +732,7 @@ function setMapTo(n){
   selRule=-1;
   paintMixes();
   syncTolPop();
-  if(n>=0&&n<=3) setTool('pick');
+  if(n>=0&&n<mixList.length) setTool('pick');
 }
 function buildMixes(){
   mixList=[];
@@ -718,25 +740,41 @@ function buildMixes(){
     for(let b=0;b<=4-a;b++)
       for(let c=0;c<=4-a-b;c++)
         mixList.push([a,b,c,4-a-b-c]);
-  const items=[];
+  const groups={};
   mixList.forEach(function(cnt,i){
-    if(isPureMix(cnt)) return;
-    const rgb=mixRgb(cnt);
-    items.push({i:i,rgb:rgb,lum:lumOf(rgb),html:'<button type=button title="'+mixLabel(cnt)+'" data-m="'+i+'">'+swatchHtml(rgb,mixLabel(cnt))+'</button>'});
+    const p=mixPos(cnt);
+    const key=Math.round(p.x*4)+','+Math.round(p.y*4);
+    (groups[key]=groups[key]||[]).push({i:i,cnt:cnt,p:p});
   });
-  items.sort(function(a,b){return a.lum-b.lum;});
-  const mid=Math.floor(items.length/2);
-  mixSplit=items.length?((items[mid-1].lum+items[mid].lum)/2):128;
-  $('mixL').innerHTML=items.slice(0,mid).map(function(it){return it.html;}).join('');
-  $('mixR').innerHTML=items.slice(mid).map(function(it){return it.html;}).join('');
-  if(!$('wireWrap')._mixClick){
-    $('wireWrap')._mixClick=true;
+  const pureCls=['pal-k','pal-w','pal-y','pal-r'];
+  let html='';
+  Object.keys(groups).forEach(function(key){
+    const g=groups[key];
+    g.forEach(function(it,gi){
+      const rgb=mixRgb(it.cnt);
+      let ox=0,oy=0;
+      if(g.length>1){
+        const ang=gi*(Math.PI*2)/g.length-Math.PI/2;
+        ox=Math.cos(ang)*9;
+        oy=Math.sin(ang)*9;
+      }
+      const sty=posStyle(it.p.x,it.p.y,ox,oy);
+      const ink=pureInkOf(it.cnt);
+      if(ink>=0){
+        html+='<button type=button class="sw-pure '+pureCls[ink]+'" data-m="'+it.i+'" style="'+sty+'" title="'+PN[ink]+'" aria-label="'+PN[ink]+'"></button>';
+      }else{
+        html+='<button type=button class=sw-mix data-m="'+it.i+'" style="'+sty+';background:rgb('+rgb[0]+','+rgb[1]+','+rgb[2]+')" title="'+mixLabel(it.cnt)+'"></button>';
+      }
+    });
+  });
+  $('cmapPlot').innerHTML=html;
+  if(!$('wireWrap')._cmapClick){
+    $('wireWrap')._cmapClick=true;
     $('wireWrap').addEventListener('click',function(e){
-      const btn=e.target.closest('[data-m]');
-      if(!btn) return;
-      const mi=+btn.dataset.m;
-      const rgb=mixRgb(mixList[mi]);
-      addOrSelectRule(rgb[0],rgb[1],rgb[2],mi);
+      const mix=e.target.closest('[data-m]');
+      if(mix){setMapTo(+mix.dataset.m);return;}
+      const chip=e.target.closest('[data-c]');
+      if(chip) selectRule(+chip.dataset.c,true);
     });
   }
   paintMixes();
@@ -860,10 +898,10 @@ function endBrushStroke(e){
 }
 pvCv.onpointerdown=function(e){
   if(tool==='pick'){
+    if(!adjRgb) return;
     const xy=canvasXY(pvCv,e);
-    const id=composedIdx();
-    const p=PAL[id[xy[1]*W+xy[0]]];
-    addOrSelectRule(p[0],p[1],p[2]);
+    const j=(xy[1]*W+xy[0])*3;
+    addOrSelectRule(adjRgb[j],adjRgb[j+1],adjRgb[j+2]);
     return;
   }
   if(tool!=='erase'&&tool!=='brush') return;
@@ -1083,7 +1121,6 @@ function resetSide(){
 $('btnReset').onclick=function(){resetView();schedule(true);};
 $('btnSideReset').onclick=function(){resetSide();schedule(true);};
 $('btnClearMaps').onclick=function(){if(!rules.length)return;pushRulesHist();rules=[];selRule=-1;renderRules();schedule(true);};
-for(let i=0;i<4;i++) $('map'+i).onclick=function(){setMapTo(+this.id.slice(3));};
 for(let i=0;i<4;i++) $('br'+i).onclick=function(){setBrushCol(+this.id.slice(2));setTool('brush');};
 for(let i=0;i<4;i++) $('flt'+i).onclick=function(){setVisCol(+this.id.slice(3));};
 function loadImage(im,name,isSaved){
