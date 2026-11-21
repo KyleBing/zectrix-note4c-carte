@@ -153,6 +153,8 @@ body.page-album main{max-width:none;width:100%;margin:0;padding:0;display:block}
 .ed-maps{width:800px;max-width:100%;box-sizing:border-box;padding:10px 12px 16px;border-top:1px solid #d0cec8;background:#fff}
 .ed-maps button{padding:4px 8px;font-size:12px;border-radius:0}
 .ed-map-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ed-map-bar .ed-mixn{margin-left:auto}
+.ed-map-bar .ed-mixn button{padding:5px 10px;font-size:12px}
 .ed-map-body{display:flex;align-items:flex-start;gap:8px;margin-top:6px;min-width:0}
 .ed-map-hint{margin:8px 0 0;font-size:11px;line-height:1.35;color:#6b6b6b}
 .ed-cmap{position:relative;flex:1;min-width:0;height:380px;border:1px solid #ccc;background:linear-gradient(180deg,#f7f5ef,#f0eee8);overflow:hidden}
@@ -211,7 +213,8 @@ body.page-album main{max-width:none;width:100%;margin:0;padding:0;display:block}
 .ed-album{padding:14px 12px 24px;background:#f0eee8;flex:0 0 auto}
 .ed-album-h{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
 .ed-album-h h2{margin:0;font-size:14px}
-.ed-album-h .show-lab{margin-left:auto}
+.ed-album-h #btnExportAll{margin-left:auto;padding:6px 10px;font-size:12px}
+.ed-album-h .show-lab{margin-left:0}
 .ed-album .check-row{border-radius:0;margin:0 0 8px;max-width:420px}
 .ed-album .hdr-hint{margin:0 0 14px;font-size:12px;color:#6b6b6b;max-width:420px}
 .ed-saved{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;overflow:visible;padding-bottom:4px}

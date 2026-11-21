@@ -18,8 +18,8 @@ void webAlbumAppendPage(String &b) {
       "<div class=ed-toolbar>"
       "<div class=ed-tool-main>"
       "<label class=file-pick>"
-      "<span class=file-cta><input type=file id=pick accept='image/*,.2bp,application/octet-stream'>选取图片 / .2bp</span>"
-      "<span class='file-name empty' id=fileName>未选择文件</span>"
+      "<span class=file-cta><input type=file id=pick accept='image/*,.2bp,application/octet-stream' multiple>选取图片 / .2bp</span>"
+      "<span class='file-name empty' id=fileName>未选择 · 可多选批量导入</span>"
       "</label>"
       "<div class=ed-sep></div>"
       "<div class=ed-tool-group title=画面>"
@@ -87,6 +87,12 @@ void webAlbumAppendPage(String &b) {
       "<div class=ed-map-bar>"
       "<button type=button id=btnPick class=secondary>取色</button>"
       "<button type=button id=btnClearMaps class=secondary>清空绑定</button>"
+      "<div class='ed-mode ed-mixn' id=mixNBar title=混合粒度>"
+      "<button type=button id=mixN1 title='1 份墨水 · 4 色'>1×1</button>"
+      "<button type=button id=mixN2 title='2 份墨水 · 10 色'>1×2</button>"
+      "<button type=button id=mixN3 title='3 份墨水 · 20 色'>√3</button>"
+      "<button type=button id=mixN4 class=on title='4 份墨水 · 35 色'>2×2</button>"
+      "</div>"
       "</div>"
       "<div class=ed-map-body>"
       "<div class=ed-cmap id=wireWrap>"
@@ -103,7 +109,7 @@ void webAlbumAppendPage(String &b) {
       "<em id=tolV>36</em>"
       "</div>"
       "</div>"
-      "<p class=hint ed-map-hint>色盘正方形排布（左上黑 / 右上白 / 左下黄 / 右下红，共 35 原始色）。初始按最近原始色匹配。点原始色后再在左图取色绑定，照片色排在色块周边；同一照片色再次绑定会取消先前绑定。点圆点改容差；Backspace / Delete 删除；Ctrl/⌘+Z 撤销。</p>"
+      "<p class=hint ed-map-hint id=mapHint>色盘正方形（左上黑 / 右上白 / 左下黄 / 右下红）。可选 1×1 / 1×2 / √3 / 2×2 混合粒度。初始按最近原始色匹配；点原始色后再在左图取色绑定。</p>"
       "<div id=rules class=rules></div>"
       "</div></div>"
       "<aside class=ed-side>"
@@ -154,6 +160,7 @@ void webAlbumAppendPage(String &b) {
       "<p class=hint style=margin:0>最多 ");
   b += String(ALBUM_MAX);
   b += F(" 张 · 取消展示后设备不翻到该图</p>"
+         "<button type=button id=btnExportAll class=secondary>批量导出</button>"
          "<label class=show-lab><input type=checkbox id=selAll>全选展示</label>"
          "</div>"
          "<label class=check-row><input type=checkbox id=showHeader");
@@ -174,7 +181,10 @@ function $(id){return document.getElementById(id)}
 function val(id){return +$(id).value}
 let img=null,packed=null,rules=[],mapTo=-1,selRule=-1,cover=true,tool='pan',grain=true;
 let rulesHist=[],RULES_HIST_MAX=40;
-function cloneRulesState(){return {rules:JSON.parse(JSON.stringify(rules)),selRule:selRule};}
+let mixN=4;
+const MIX_N_LAB={1:'1×1',2:'1×2',3:'√3',4:'2×2'};
+const MIX_N_ALL=[1,2,3,4];
+function cloneRulesState(){return {rules:JSON.parse(JSON.stringify(rules)),selRule:selRule,mixN:mixN};}
 function pushRulesHist(){
   rulesHist.push(cloneRulesState());
   if(rulesHist.length>RULES_HIST_MAX) rulesHist.shift();
@@ -182,8 +192,14 @@ function pushRulesHist(){
 function undoRules(){
   if(!rulesHist.length){toast('没有可撤销');return;}
   const s=rulesHist.pop();
+  if(s.mixN&&s.mixN!==mixN){
+    mixN=s.mixN;
+    syncMixNBtns();
+    buildMixes();
+  }
   rules=s.rules;selRule=s.selRule;
   if(selRule>=rules.length) selRule=-1;
+  if(mapTo>=mixList.length) mapTo=-1;
   renderRules();schedule(true);toast('已撤销');
 }
 let mixList=[],mixLayout=[];
@@ -217,12 +233,10 @@ function nearest(r,g,b){
   return bi;
 }
 function mixRgb(cnt){
+  const n=cnt[0]+cnt[1]+cnt[2]+cnt[3]||mixN;
   let r=0,g=0,b=0;
   for(let i=0;i<4;i++){r+=PAL[i][0]*cnt[i];g+=PAL[i][1]*cnt[i];b+=PAL[i][2]*cnt[i];}
-  return [Math.round(r/4),Math.round(g/4),Math.round(b/4)];
-}
-function isPureMix(cnt){
-  return cnt.some(function(n){return n===4;});
+  return [Math.round(r/n),Math.round(g/n),Math.round(b/n)];
 }
 function gammaFromMid(){
   const t=Math.min(0.99,Math.max(0.01,(mid-blk)/Math.max(1,wht-blk)));
@@ -376,8 +390,19 @@ function nearestMixIdx(r,g,b){
   return bi;
 }
 function pureInkOf(cnt){
-  for(let i=0;i<4;i++) if(cnt[i]===4) return i;
+  for(let i=0;i<4;i++) if(cnt[i]===mixN) return i;
   return -1;
+}
+function syncMixNBtns(){
+  MIX_N_ALL.forEach(function(n){
+    const el=$('mixN'+n);
+    if(el) el.classList.toggle('on', n===mixN);
+  });
+}
+function updateMixHint(){
+  const el=$('mapHint');
+  if(!el) return;
+  el.textContent='色盘正方形（左上黑 / 右上白 / 左下黄 / 右下红），混合 '+MIX_N_LAB[mixN]+' · '+mixList.length+' 原始色。初始按最近原始色匹配；点原始色后再在左图取色绑定，照片色排在色块周边；同一照片色再次绑定会取消先前绑定。';
 }
 // 规则：照片色 → 原始色（mix 下标）；无规则则返回 -1，由 nearestMixIdx 决定
 function mapPixel(r,g,b){
@@ -605,7 +630,8 @@ function origName(mi){
 }
 function mixPos(cnt){
   // 正方形：左上黑、右上白、左下黄、右下红
-  return {x:(cnt[1]+cnt[3])/4, y:(cnt[2]+cnt[3])/4};
+  const n=mixN||4;
+  return {x:(cnt[1]+cnt[3])/n, y:(cnt[2]+cnt[3])/n};
 }
 function posStyle(x,y,ox,oy){
   ox=ox||0;oy=oy||0;
@@ -690,7 +716,7 @@ function renderRules(){
       const rgb=[Math.round(u.r),Math.round(u.g),Math.round(u.b)];
       btn.title='照片 '+rgb.join(',')+' ±'+u.tol+' → '+origName(mi);
       const off=chipOrbit(mi,k,n);
-      const ring=mixRgb(mixList[mi]||[0,0,0,4]);
+      const ring=mixRgb(mixList[mi]||[0,0,0,mixN]);
       btn.style.cssText=layoutStyle(mi,off.ox,off.oy)+';background:rgb('+rgb[0]+','+rgb[1]+','+rgb[2]+');border-color:rgb('+ring[0]+','+ring[1]+','+ring[2]+')';
       plot.appendChild(btn);
     });
@@ -733,17 +759,38 @@ function setMapTo(n){
   syncTolPop();
   if(n>=0&&n<mixList.length) setTool('pick');
 }
+function setMixN(n){
+  n=+n;
+  if(MIX_N_ALL.indexOf(n)<0) return;
+  if(n===mixN) return;
+  const prevTargets=rules.map(function(u){
+    if(u.to>=0&&u.to<mixList.length) return mixRgb(mixList[u.to]);
+    return [u.r,u.g,u.b];
+  });
+  pushRulesHist();
+  mixN=n;
+  mapTo=-1;selRule=-1;
+  syncMixNBtns();
+  buildMixes();
+  rules.forEach(function(u,i){
+    const t=prevTargets[i];
+    u.to=nearestMixIdx(t[0],t[1],t[2]);
+  });
+  renderRules();
+  schedule(true);
+  toast('混合 '+MIX_N_LAB[mixN]+' · '+mixList.length+' 原始色');
+}
 function buildMixes(){
   mixList=[];
-  for(let a=0;a<=4;a++)
-    for(let b=0;b<=4-a;b++)
-      for(let c=0;c<=4-a-b;c++)
-        mixList.push([a,b,c,4-a-b-c]);
+  for(let a=0;a<=mixN;a++)
+    for(let b=0;b<=mixN-a;b++)
+      for(let c=0;c<=mixN-a-b;c++)
+        mixList.push([a,b,c,mixN-a-b-c]);
   mixLayout=new Array(mixList.length);
   const groups={};
   mixList.forEach(function(cnt,i){
     const p=mixPos(cnt);
-    const key=Math.round(p.x*4)+','+Math.round(p.y*4);
+    const key=Math.round(p.x*mixN)+','+Math.round(p.y*mixN);
     (groups[key]=groups[key]||[]).push({i:i,cnt:cnt,p:p});
   });
   Object.keys(groups).forEach(function(key){
@@ -781,6 +828,7 @@ function buildMixes(){
       if(chip) selectRule(+chip.dataset.c,true);
     });
   }
+  updateMixHint();
   paintMixes();
 }
 function setVisCol(n){
@@ -1149,6 +1197,10 @@ function resetSide(){
 $('btnReset').onclick=function(){resetView();schedule(true);};
 $('btnSideReset').onclick=function(){resetSide();schedule(true);};
 $('btnClearMaps').onclick=function(){if(!rules.length)return;pushRulesHist();rules=[];selRule=-1;renderRules();schedule(true);};
+MIX_N_ALL.forEach(function(n){
+  const el=$('mixN'+n);
+  if(el) el.onclick=function(){setMixN(n);};
+});
 for(let i=0;i<4;i++) $('br'+i).onclick=function(){setBrushCol(+this.id.slice(2));setTool('brush');};
 for(let i=0;i<4;i++) $('flt'+i).onclick=function(){setVisCol(+this.id.slice(3));};
 function loadImage(im,name,isSaved){
@@ -1187,29 +1239,115 @@ function loadFrom2bp(buf,name,isSaved){
   };
   im.src=c.toDataURL('image/png');
 }
-$('pick').onchange=function(){
-  const f=this.files[0];
-  if(!f) return;
-  const is2bp=/\.2bp$/i.test(f.name)||f.type==='application/octet-stream';
-  if(is2bp||f.size===FRAME){
+function readFileBuf(f){
+  return new Promise(function(res,rej){
     const rd=new FileReader();
-    rd.onload=function(){
-      try{
-        loadFrom2bp(new Uint8Array(rd.result),f.name,/\.2bp$/i.test(f.name));
-      }catch(e){
-        $('fileName').textContent=String(e);
-        toast(String(e),true);
-      }
-    };
-    rd.onerror=function(){$('fileName').textContent='读取失败';};
+    rd.onload=function(){res(rd.result);};
+    rd.onerror=function(){rej(new Error('读取失败'));};
     rd.readAsArrayBuffer(f);
+  });
+}
+function loadImageFromFile(f){
+  return new Promise(function(res,rej){
+    const url=URL.createObjectURL(f);
+    const im=new Image();
+    im.onload=function(){URL.revokeObjectURL(url);res(im);};
+    im.onerror=function(){URL.revokeObjectURL(url);rej(new Error('图片加载失败'));};
+    im.src=url;
+  });
+}
+function is2bpFile(f){
+  return /\.2bp$/i.test(f.name)||f.type==='application/octet-stream'||f.size===FRAME;
+}
+async function uploadBytes(bytes,hint){
+  const fd=new FormData();
+  fd.append('file',new Blob([bytes],{type:'application/octet-stream'}),hint||'photo.2bp');
+  const r=await fetch('/album/upload',{method:'POST',body:fd});
+  const t=await r.text();
+  if(!r.ok) throw new Error(t||String(r.status));
+  return t;
+}
+async function albumSlotsLeft(){
+  const r=await fetch('/album/list');
+  const j=await r.json();
+  const max=j.max||30,cnt=j.count||((j.files&&j.files.length)||0);
+  return Math.max(0,max-cnt);
+}
+async function openOneFile(f){
+  if(is2bpFile(f)){
+    const buf=new Uint8Array(await readFileBuf(f));
+    loadFrom2bp(buf,f.name,/\.2bp$/i.test(f.name));
     return;
   }
-  const url=URL.createObjectURL(f);
-  const im=new Image();
-  im.onload=function(){URL.revokeObjectURL(url);loadImage(im,f.name,false);};
-  im.onerror=function(){$('fileName').textContent='图片加载失败';URL.revokeObjectURL(url);};
-  im.src=url;
+  const im=await loadImageFromFile(f);
+  loadImage(im,f.name,false);
+}
+async function batchImport(files){
+  let room=await albumSlotsLeft();
+  if(!room){toast('相册已满（最多 30 张）',true);return;}
+  const list=files.slice(0,room);
+  let ok=0,fail=0,lastSaved='';
+  // 保留侧栏色阶；批量时不用上一张的取色绑定
+  rules=[];selRule=-1;setMapTo(-1);renderRules();
+  $('btnUpload').disabled=true;
+  $('btnSaveAs').disabled=true;
+  for(let i=0;i<list.length;i++){
+    const f=list[i];
+    const tag=(i+1)+'/'+list.length;
+    $('fileName').classList.remove('empty');
+    $('fileName').textContent='批量 '+tag+' · '+f.name;
+    $('convInfo').textContent='批量导入 '+tag+'…';
+    toast('批量导入 '+tag+'…');
+    try{
+      let saved='';
+      if(is2bpFile(f)){
+        const buf=new Uint8Array(await readFileBuf(f));
+        if(buf.length!==FRAME) throw new Error('尺寸不对');
+        saved=await uploadBytes(buf,/\.2bp$/i.test(f.name)?f.name:'photo.2bp');
+        if(i===list.length-1) loadFrom2bp(buf,saved,true);
+      }else{
+        const im=await loadImageFromFile(f);
+        img=im;editName='';
+        resetView();
+        pack(!!grain);
+        saved=await uploadBytes(packed,'photo.2bp');
+        if(i===list.length-1){
+          editName=saved;
+          const fn=$('fileName');
+          fn.classList.remove('empty');
+          fn.textContent=saved+' · '+f.name+(im.width?('  '+im.width+'×'+im.height):'');
+          $('btnUpload').textContent='覆盖';
+          $('convInfo').textContent=(grain?'颗粒 ':'色块 ')+saved;
+        }
+      }
+      lastSaved=saved;
+      ok++;
+    }catch(e){
+      fail++;
+      toast('失败 '+f.name+'：'+e,true);
+    }
+  }
+  if(lastSaved&&!editName) editName=lastSaved;
+  $('btnUpload').disabled=!packed;
+  $('btnSaveAs').disabled=!packed;
+  if(packed) $('btnUpload').textContent=editName?'覆盖':'上传';
+  await refreshList();
+  const more=files.length>list.length?(' · 跳过 '+(files.length-list.length)+'（已满）'):'';
+  const msg='批量完成：成功 '+ok+(fail?(' · 失败 '+fail):'')+more;
+  $('convInfo').textContent=msg;
+  toast(msg,!!fail);
+}
+$('pick').onchange=async function(){
+  const files=[].slice.call(this.files||[]);
+  this.value='';
+  if(!files.length) return;
+  try{
+    if(files.length===1) await openOneFile(files[0]);
+    else await batchImport(files);
+  }catch(e){
+    $('fileName').textContent=String(e);
+    toast(String(e),true);
+  }
 };
 function decode2bp(u8){
   const idx=new Uint8Array(W*H);
@@ -1253,6 +1391,29 @@ async function downloadSaved(name){
   // 导出原始 .2bp（四色索引帧），避免 PNG 往返变色
   const fname=/\.2bp$/i.test(name)?name:(name+'.2bp');
   saveBlob(new Blob([buf],{type:'application/octet-stream'}),fname);
+}
+async function batchExportAll(){
+  const r=await fetch('/album/list');
+  const j=await r.json();
+  const names=(j.files||[]).map(function(it){return typeof it==='string'?it:it.name;}).filter(Boolean);
+  if(!names.length){toast('没有可导出的照片',true);return;}
+  const btn=$('btnExportAll');
+  if(btn) btn.disabled=true;
+  let ok=0;
+  try{
+    for(let i=0;i<names.length;i++){
+      toast('导出 '+(i+1)+'/'+names.length+'…');
+      await downloadSaved(names[i]);
+      ok++;
+      // 浏览器常拦截连下；稍等再下下一张
+      if(i+1<names.length) await new Promise(function(res){setTimeout(res,350);});
+    }
+    toast('已导出 '+ok+' 张 .2bp');
+  }catch(e){
+    toast('导出中断（已 '+ok+'）：'+e,true);
+  }finally{
+    if(btn) btn.disabled=false;
+  }
 }
 async function loadSaved(name){
   const resp=await fetch('/album/file?name='+encodeURIComponent(name));
@@ -1397,6 +1558,9 @@ $('showHeader').onchange=async function(){
   const show=this.checked?1:0;
   await fetch('/album/header?show='+show,{method:'POST'});
   toast(show?'已显示相册标题栏':'已隐藏相册标题栏');
+};
+$('btnExportAll').onclick=function(){
+  batchExportAll().catch(function(e){toast(String(e),true);});
 };
 $('selAll').onchange=async function(){
   const show=this.checked?1:0;

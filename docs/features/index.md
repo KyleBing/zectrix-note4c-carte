@@ -17,7 +17,7 @@
 | 多 App | 上下短按切换：TODO → CALENDAR → WEATHER → ALBUM；顶栏单行色点（白 3×7 / 选中 3×11，间隔 2px） |
 | 日历 | 格内大字公历 + 小字农历；今天红底白字；停留本 App 时默认每日 0 点跨日重绘；Web 可配周起始 / 时区 / 手动时间 |
 | 时钟 | PCF8563；复位后联网校一次，平时按周期 NTP（默认 30 天）；可离线手设 |
-| 相册 | Web `/album` 页内编辑（裁切/色阶/取色映射）后抖动上传 `.2bp`；下载/再导入用无损 `.2bp`（勿用 PNG 往返）；BOOT 翻页；最多 30 张；可取消「展示」但仍保留文件 |
+| 相册 | Web `/album` 页内编辑（裁切/色阶/取色映射）后抖动上传 `.2bp`；支持多选批量导入与批量导出 `.2bp`；下载/再导入用无损 `.2bp`（勿用 PNG 往返）；BOOT 翻页；最多 30 张；可取消「展示」但仍保留文件 |
 | 多 WiFi | 最多 5 组 SSID；按 Active → 其余顺序自动连接 |
 | 配网 Web | 同 WiFi 站点，或 AP 模式热点 `Note4C-Carte`（`http://192.168.4.1`） |
 | Portal 登录 | `POST /portal/user/login`，JWT 落盘 |
@@ -67,7 +67,7 @@
 | `/auth` | Portal Base URL、邮箱登录、Diary ID |
 | `/todo` | 在线预览拉取到的日记正文 |
 | `/weather` | 启用开关 + 城市搜索选 LocationID（经 Portal geo） |
-| `/album` | 选图 → 页内抖动成 `.2bp` → 上传 / 列表 / 删除 |
+| `/album` | 选图（可多选批量导入）→ 页内抖动成 `.2bp` → 上传 / 列表 / 批量导出 / 删除 |
 | `/errors` | 过往错误事件（最多 40 条，可清空） |
 
 默认 Portal Base URL：`https://kylebing.cn/portal`。
