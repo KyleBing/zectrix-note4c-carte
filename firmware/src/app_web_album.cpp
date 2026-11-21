@@ -90,10 +90,10 @@ void webAlbumAppendPage(String &b) {
       "</div>"
       "<div class=ed-map-body>"
       "<div class=ed-cmap id=wireWrap>"
-      "<div class='ed-cmap-edge e-t'>黄</div>"
-      "<div class='ed-cmap-edge e-b'>红</div>"
-      "<div class='ed-cmap-edge e-l'>黑</div>"
-      "<div class='ed-cmap-edge e-r'>白</div>"
+      "<div class='ed-cmap-edge e-tl'>黑</div>"
+      "<div class='ed-cmap-edge e-tr'>白</div>"
+      "<div class='ed-cmap-edge e-bl'>黄</div>"
+      "<div class='ed-cmap-edge e-br'>红</div>"
       "<div class=ed-cmap-plot id=cmapPlot></div>"
       "<svg id=wires class=ed-wires></svg>"
       "</div>"
@@ -103,7 +103,7 @@ void webAlbumAppendPage(String &b) {
       "<em id=tolV>36</em>"
       "</div>"
       "</div>"
-      "<p class=hint ed-map-hint>色盘上是全部原始色（4 份墨水组合，共 35 色；左黑 / 右白 / 上黄 / 下红向中间过渡）。初始按最近原始色匹配照片。点某个原始色后再在左图取色，把照片颜色绑定到该原始色；圆点是照片色。点绑定可改容差；Backspace / Delete 删除；Ctrl/⌘+Z 撤销。</p>"
+      "<p class=hint ed-map-hint>色盘正方形排布（左上黑 / 右上白 / 左下黄 / 右下红，共 35 原始色）。初始按最近原始色匹配。点原始色后再在左图取色绑定，照片色排在色块周边；同一照片色再次绑定会取消先前绑定。点圆点改容差；Backspace / Delete 删除；Ctrl/⌘+Z 撤销。</p>"
       "<div id=rules class=rules></div>"
       "</div></div>"
       "<aside class=ed-side>"
@@ -144,7 +144,7 @@ void webAlbumAppendPage(String &b) {
       "</div>"
       "</div>"
       "</div>"
-      "<p class=hint ed-help>左图载入后一直是原图。调色、色块和颜色绑定只改右图。色盘是原始色；初始自动就近匹配，再点原始色去左图取色绑定。色块是不带颗粒的纯色块。空格+拖动平移。</p>"
+      "<p class=hint ed-help>左图载入后一直是原图。调色、色块和颜色绑定只改右图。色盘是原始色；初始自动就近匹配，再点原始色去左图取色绑定。色块是不带颗粒的纯色块。空格+拖动平移；按住 Shift 只沿水平或垂直移动。</p>"
       "</aside>"
       "</div></div>"
       "<div id=toast class=ed-toast></div>"
@@ -186,8 +186,9 @@ function undoRules(){
   if(selRule>=rules.length) selRule=-1;
   renderRules();schedule(true);toast('已撤销');
 }
-let mixList=[];
+let mixList=[],mixLayout=[];
 let drag=false,lx=0,ly=0,tmr=null,adjRgb=null,rawLum=null;
+let panAxis=null,panOx=0,panOy=0,pan0x=0,pan0y=0;
 let baseIdx=null,paint=new Int8Array(W*H);
 let blk=0,mid=128,wht=255,outBlk=0,outWht=255,histDrag=-1,editName='',brushCol=0,loupeRight=false,visCol=-1;
 let spaceHeld=false,pvDrag=false,pvx=0,pvy=0;
@@ -603,12 +604,25 @@ function origName(mi){
   return mixLabel(mixList[mi]);
 }
 function mixPos(cnt){
-  // 左黑右白、上黄下红，向中心过渡
-  return {x:(cnt[1]-cnt[0])/4, y:(cnt[2]-cnt[3])/4};
+  // 正方形：左上黑、右上白、左下黄、右下红
+  return {x:(cnt[1]+cnt[3])/4, y:(cnt[2]+cnt[3])/4};
 }
 function posStyle(x,y,ox,oy){
   ox=ox||0;oy=oy||0;
-  return 'left:calc('+(50+x*46)+'% + '+ox+'px);top:calc('+(50-y*46)+'% + '+oy+'px)';
+  const m=6;
+  return 'left:calc('+(m+x*(100-2*m))+'% + '+ox+'px);top:calc('+(m+y*(100-2*m))+'% + '+oy+'px)';
+}
+function layoutStyle(mi,ox,oy){
+  const L=mixLayout[mi];
+  if(!L) return posStyle(0,0,ox,oy);
+  return posStyle(L.x,L.y,L.ox+(ox||0),L.oy+(oy||0));
+}
+// 绑定照片色均匀排在原始色块周边
+function chipOrbit(mi,k,n){
+  const pure=pureInkOf(mixList[mi])>=0;
+  const R=pure?22:18;
+  const ang=-Math.PI/2+(Math.PI*2)*k/Math.max(1,n);
+  return {ox:Math.cos(ang)*R, oy:Math.sin(ang)*R};
 }
 function swatchEl(mi){
   return document.querySelector('#cmapPlot [data-m="'+mi+'"]');
@@ -654,49 +668,32 @@ function drawWires(){
   const wr=wrap.getBoundingClientRect();
   svg.setAttribute('width',Math.max(1,wr.width));
   svg.setAttribute('height',Math.max(1,wr.height));
-  let html='';
-  rules.forEach(function(u,i){
-    const orig=swatchEl(u.to);
-    const chip=document.querySelector('#cmapPlot [data-c="'+i+'"]');
-    if(!orig||!chip) return;
-    const a=orig.getBoundingClientRect(),b=chip.getBoundingClientRect();
-    const x1=a.left+a.width/2-wr.left,y1=a.top+a.height/2-wr.top;
-    const x2=b.left+b.width/2-wr.left,y2=b.top+b.height/2-wr.top;
-    const p=mixRgb(mixList[u.to]);
-    const col='rgb('+p[0]+','+p[1]+','+p[2]+')';
-    const w=i===selRule?3.6:2;
-    html+='<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="transparent" stroke-width="14" data-line="'+i+'"/>';
-    html+='<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+col+'" stroke-width="'+w+'" data-line="'+i+'"/>';
-  });
-  svg.innerHTML=html;
-  svg.querySelectorAll('[data-line]').forEach(function(ln){
-    ln.style.pointerEvents='stroke';
-    ln.onclick=function(e){
-      e.stopPropagation();
-      e.preventDefault();
-      selectRule(+ln.getAttribute('data-line'),true);
-    };
-  });
+  // 绑定点已贴在色块周边，不再画长连线
+  svg.innerHTML='';
 }
 function renderRules(){
   const plot=$('cmapPlot');
   if(!plot) return;
   document.querySelectorAll('#cmapPlot [data-c]').forEach(function(el){el.remove();});
-  const per={};
+  const byTo={};
   rules.forEach(function(u,i){
-    const btn=document.createElement('button');
-    btn.type='button';
-    btn.className='sw-drop';
-    btn.dataset.c=String(i);
-    const rgb=[Math.round(u.r),Math.round(u.g),Math.round(u.b)];
-    btn.title='照片 '+rgb.join(',')+' ±'+u.tol+' → '+origName(u.to);
-    const base=mixPos(mixList[u.to]||[1,1,1,1]);
-    const n=per[u.to]|0;per[u.to]=n+1;
-    const ang=n*0.9-0.4;
-    const ox=Math.cos(ang)*14,oy=Math.sin(ang)*14;
-    const ring=mixRgb(mixList[u.to]||[0,0,0,4]);
-    btn.style.cssText=posStyle(base.x,base.y,ox,oy)+';background:rgb('+rgb[0]+','+rgb[1]+','+rgb[2]+');border-color:rgb('+ring[0]+','+ring[1]+','+ring[2]+')';
-    plot.appendChild(btn);
+    (byTo[u.to]=byTo[u.to]||[]).push(i);
+  });
+  Object.keys(byTo).forEach(function(key){
+    const list=byTo[key],mi=+key,n=list.length;
+    list.forEach(function(ri,k){
+      const u=rules[ri];
+      const btn=document.createElement('button');
+      btn.type='button';
+      btn.className='sw-drop';
+      btn.dataset.c=String(ri);
+      const rgb=[Math.round(u.r),Math.round(u.g),Math.round(u.b)];
+      btn.title='照片 '+rgb.join(',')+' ±'+u.tol+' → '+origName(mi);
+      const off=chipOrbit(mi,k,n);
+      const ring=mixRgb(mixList[mi]||[0,0,0,4]);
+      btn.style.cssText=layoutStyle(mi,off.ox,off.oy)+';background:rgb('+rgb[0]+','+rgb[1]+','+rgb[2]+');border-color:rgb('+ring[0]+','+ring[1]+','+ring[2]+')';
+      plot.appendChild(btn);
+    });
   });
   paintMixes();
   syncTolPop();
@@ -707,22 +704,24 @@ function selectRule(i,force){
   if(selRule>=0 && rules[selRule]) mapTo=rules[selRule].to;
   renderRules();
 }
+function colorDist2(r,g,b,u){
+  return (r-u.r)*(r-u.r)+(g-u.g)*(g-u.g)+(b-u.b)*(b-u.b);
+}
 function addOrSelectRule(r,g,b){
   if(mapTo<0||mapTo>=mixList.length){toast('先点色盘上的原始颜色');return;}
   r=Math.round(r);g=Math.round(g);b=Math.round(b);
-  const found=rules.findIndex(function(u){return sameRgb(u,r,g,b);});
-  if(found>=0){
-    const prev=rules[found].to;
-    if(prev===mapTo){selRule=found;renderRules();return;}
-    pushRulesHist();
-    rules[found].to=mapTo;
-    selRule=found;
-    renderRules();
-    schedule(true);
-    return;
-  }
+  const tol=val('tol'),tol2=tol*tol*3;
+  // 已绑到同一原始色且颜色相同：只选中
+  const same=rules.findIndex(function(u){return u.to===mapTo&&sameRgb(u,r,g,b);});
+  if(same>=0){selRule=same;renderRules();return;}
   pushRulesHist();
-  rules.push({r:r,g:g,b:b,tol:val('tol'),to:mapTo});
+  // 后绑覆盖：相同或容差内相近的照片色取消先前绑定
+  for(let i=rules.length-1;i>=0;i--){
+    const u=rules[i];
+    const lim=Math.max(tol2,u.tol*u.tol*3);
+    if(colorDist2(r,g,b,u)<=lim) rules.splice(i,1);
+  }
+  rules.push({r:r,g:g,b:b,tol:tol,to:mapTo});
   selRule=rules.length-1;
   renderRules();
   schedule(true);
@@ -740,32 +739,37 @@ function buildMixes(){
     for(let b=0;b<=4-a;b++)
       for(let c=0;c<=4-a-b;c++)
         mixList.push([a,b,c,4-a-b-c]);
+  mixLayout=new Array(mixList.length);
   const groups={};
   mixList.forEach(function(cnt,i){
     const p=mixPos(cnt);
     const key=Math.round(p.x*4)+','+Math.round(p.y*4);
     (groups[key]=groups[key]||[]).push({i:i,cnt:cnt,p:p});
   });
-  const pureCls=['pal-k','pal-w','pal-y','pal-r'];
-  let html='';
   Object.keys(groups).forEach(function(key){
     const g=groups[key];
     g.forEach(function(it,gi){
-      const rgb=mixRgb(it.cnt);
       let ox=0,oy=0;
       if(g.length>1){
         const ang=gi*(Math.PI*2)/g.length-Math.PI/2;
-        ox=Math.cos(ang)*9;
-        oy=Math.sin(ang)*9;
+        const rad=g.length<=2?14:16;
+        ox=Math.cos(ang)*rad;
+        oy=Math.sin(ang)*rad;
       }
-      const sty=posStyle(it.p.x,it.p.y,ox,oy);
-      const ink=pureInkOf(it.cnt);
-      if(ink>=0){
-        html+='<button type=button class="sw-pure '+pureCls[ink]+'" data-m="'+it.i+'" style="'+sty+'" title="'+PN[ink]+'" aria-label="'+PN[ink]+'"></button>';
-      }else{
-        html+='<button type=button class=sw-mix data-m="'+it.i+'" style="'+sty+';background:rgb('+rgb[0]+','+rgb[1]+','+rgb[2]+')" title="'+mixLabel(it.cnt)+'"></button>';
-      }
+      mixLayout[it.i]={x:it.p.x,y:it.p.y,ox:ox,oy:oy};
     });
+  });
+  const pureCls=['pal-k','pal-w','pal-y','pal-r'];
+  let html='';
+  mixList.forEach(function(cnt,i){
+    const rgb=mixRgb(cnt);
+    const sty=layoutStyle(i,0,0);
+    const ink=pureInkOf(cnt);
+    if(ink>=0){
+      html+='<button type=button class="sw-pure '+pureCls[ink]+'" data-m="'+i+'" style="'+sty+'" title="'+PN[ink]+'" aria-label="'+PN[ink]+'"></button>';
+    }else{
+      html+='<button type=button class=sw-mix data-m="'+i+'" style="'+sty+';background:rgb('+rgb[0]+','+rgb[1]+','+rgb[2]+')" title="'+mixLabel(cnt)+'"></button>';
+    }
   });
   $('cmapPlot').innerHTML=html;
   if(!$('wireWrap')._cmapClick){
@@ -860,7 +864,11 @@ srcCv.onpointerdown=function(e){
   const xy=canvasXY(srcCv,e);
   if(canPanSrc()){
     if(!img) return;
-    drag=true;lx=e.clientX;ly=e.clientY;syncCursor();return;
+    drag=true;lx=e.clientX;ly=e.clientY;
+    panOx=e.clientX;panOy=e.clientY;
+    pan0x=val('panx');pan0y=val('pany');
+    panAxis=null;
+    syncCursor();return;
   }
   if(tool==='pick'){
     if(!adjRgb) return;
@@ -873,12 +881,32 @@ srcCv.onpointermove=function(e){
   if(tool==='pick'&&!canPanSrc()){placeLoupe(xy[2],xy[3]);drawLoupe(xy[0],xy[1]);return;}
   if(!drag||!img||!canPanSrc()) return;
   const r=srcCv.getBoundingClientRect();
-  $('panx').value=val('panx')+(e.clientX-lx)*W/r.width;
-  $('pany').value=val('pany')+(e.clientY-ly)*H/r.height;
+  if(e.shiftKey){
+    const cdx=e.clientX-panOx,cdy=e.clientY-panOy;
+    if(!panAxis&&(Math.abs(cdx)>4||Math.abs(cdy)>4))
+      panAxis=Math.abs(cdx)>=Math.abs(cdy)?'x':'y';
+    if(panAxis==='x'){
+      $('panx').value=pan0x+cdx*W/r.width;
+      $('pany').value=pan0y;
+    }else if(panAxis==='y'){
+      $('panx').value=pan0x;
+      $('pany').value=pan0y+cdy*H/r.height;
+    }
+  }else{
+    if(panAxis){
+      panAxis=null;
+      panOx=e.clientX;panOy=e.clientY;
+      pan0x=val('panx');pan0y=val('pany');
+    }
+    $('panx').value=val('panx')+(e.clientX-lx)*W/r.width;
+    $('pany').value=val('pany')+(e.clientY-ly)*H/r.height;
+    panOx=e.clientX;panOy=e.clientY;
+    pan0x=val('panx');pan0y=val('pany');
+  }
   lx=e.clientX;ly=e.clientY;scheduleGeom(false);
 };
-srcCv.onpointerup=function(){if(drag){drag=false;syncCursor();scheduleGeom(true);}};
-srcCv.onpointercancel=function(){if(drag){drag=false;syncCursor();scheduleGeom(true);}else syncCursor();};
+srcCv.onpointerup=function(){if(drag){drag=false;panAxis=null;syncCursor();scheduleGeom(true);}};
+srcCv.onpointercancel=function(){if(drag){drag=false;panAxis=null;syncCursor();scheduleGeom(true);}else syncCursor();};
 srcCv.onpointerleave=function(){if(tool==='pick'&&!spaceHeld) $('loupe').style.display='none';};
 const pvCv=$('preview');
 const pvBox=$('pvInner').parentElement;
