@@ -92,6 +92,7 @@ void webAlbumAppendPage(String &b) {
       "<button type=button id=mixN2 title='2 份墨水 · 10 色'>1×2</button>"
       "<button type=button id=mixN3 title='3 份墨水 · 20 色'>√3</button>"
       "<button type=button id=mixN4 class=on title='4 份墨水 · 35 色'>2×2</button>"
+      "<button type=button id=mixN9 title='9 份墨水 · 220 色'>3×3</button>"
       "</div>"
       "</div>"
       "<div class=ed-map-body>"
@@ -109,7 +110,7 @@ void webAlbumAppendPage(String &b) {
       "<em id=tolV>36</em>"
       "</div>"
       "</div>"
-      "<p class=hint ed-map-hint id=mapHint>色盘正方形（左上黑 / 右上白 / 左下黄 / 右下红）。可选 1×1 / 1×2 / √3 / 2×2 混合粒度。初始按最近原始色匹配；点原始色后再在左图取色绑定。</p>"
+      "<p class=hint ed-map-hint id=mapHint>色盘正方形（左上黑 / 右上白 / 左下黄 / 右下红）。可选 1×1 / 1×2 / √3 / 2×2 / 3×3 混合粒度。初始按最近原始色匹配；点原始色后再在左图取色绑定。</p>"
       "<div id=rules class=rules></div>"
       "</div></div>"
       "<aside class=ed-side>"
@@ -123,12 +124,14 @@ void webAlbumAppendPage(String &b) {
       "<div class=ink-hist-read>"
       "<span id=ink0>黑 —</span><span id=ink1>白 —</span><span id=ink2>黄 —</span><span id=ink3>红 —</span>"
       "</div>"
-      "<div class=ed-row><span>亮度</span><input type=range id=brt min=20 max=180 value=100><em id=brtV>100%</em></div>"
-      "<div class=ed-row><span>对比</span><input type=range id=con min=20 max=220 value=100><em id=conV>100%</em></div>"
-      "<div class=ed-row><span>饱和</span><input type=range id=sat min=0 max=250 value=100><em id=satV>100%</em></div>"
-      "<div class=ed-row><span>色相</span><input type=range id=hue min=-180 max=180 value=0><em id=hueV>0°</em></div>"
-      "<div class=ed-row><span>色温</span><input type=range id=tmp min=-80 max=80 value=0><em id=tmpV>0</em></div>"
-      "<div class=ed-row id=dithRow><span>颗粒</span><input type=range id=dith min=20 max=160 value=100><em id=dithV>100%</em></div>"
+      "<div class=ed-row><span>亮度</span><input type=range id=brt min=20 max=180 value=100 title=亮度><em id=brtV>100%</em></div>"
+      "<div class=ed-row><span>对比</span><input type=range id=con min=20 max=220 value=100 title=对比度><em id=conV>100%</em></div>"
+      "<div class=ed-row><span>伽马</span><input type=range id=gma min=0.20 max=3.00 step=0.01 value=1.00 title=伽马><em id=gmaV>1.00</em></div>"
+      "<div class=ed-row><span>饱和</span><input type=range id=sat min=0 max=250 value=100 title=饱和度><em id=satV>100%</em></div>"
+      "<div class=ed-row><span>色相</span><input type=range id=hue min=-180 max=180 value=0 title=色相><em id=hueV>0°</em></div>"
+      "<div class=ed-row><span>色温</span><input type=range id=tmp min=-80 max=80 value=0 title='色温 冷←→暖'><em id=tmpV>0</em></div>"
+      "<div class=ed-row><span>色调</span><input type=range id=tint min=-80 max=80 value=0 title='色调 绿←→品红'><em id=tintV>0</em></div>"
+      "<div class=ed-row id=dithRow><span>颗粒</span><input type=range id=dith min=20 max=160 value=100 title=抖动强度><em id=dithV>100%</em></div>"
       "</div>"
       "<div class=ed-levels>"
       "<div class=ed-side-h>"
@@ -137,15 +140,15 @@ void webAlbumAppendPage(String &b) {
       "<div class=ed-block>"
       "<div class=hist-wrap><canvas id=hist width=1024 height=160 tabindex=0></canvas></div>"
       "<div class=hist-read><span id=lvBlk>黑 0</span><span id=lvMid>γ 1.00</span><span id=lvWht>白 255</span></div>"
-      "<div class=ed-row><span>黑场</span><input type=range id=inBlk min=0 max=254 step=1 value=0><input type=number id=inBlkN class=ed-num min=0 max=254 step=1 value=0></div>"
-      "<div class=ed-row><span>灰点</span><input type=range id=inMid min=1 max=254 step=1 value=128><input type=number id=inMidN class=ed-num min=1 max=254 step=1 value=128></div>"
-      "<div class=ed-row><span>白场</span><input type=range id=inWht min=1 max=255 step=1 value=255><input type=number id=inWhtN class=ed-num min=1 max=255 step=1 value=255></div>"
+      "<div class=ed-row><span>黑场</span><input type=range id=inBlk min=0 max=254 step=1 value=0 title=输入黑场><input type=number id=inBlkN class=ed-num min=0 max=254 step=1 value=0></div>"
+      "<div class=ed-row><span>中点</span><input type=range id=inMid min=1 max=254 step=1 value=128 title='输入中点（与伽马联动）'><input type=number id=inMidN class=ed-num min=1 max=254 step=1 value=128></div>"
+      "<div class=ed-row><span>白场</span><input type=range id=inWht min=1 max=255 step=1 value=255 title=输入白场><input type=number id=inWhtN class=ed-num min=1 max=255 step=1 value=255></div>"
       "<div>"
-      "<div class=ed-row><span>出黑</span><input type=range id=outBlk min=0 max=254 step=1 value=0><em id=outBlkV>0</em></div>"
-      "<div class=ed-row><span>出白</span><input type=range id=outWht min=1 max=255 step=1 value=255><em id=outWhtV>255</em></div>"
-      "<div class=ed-row><span>黄墨</span><input type=range id=yel min=0 max=220 value=100><em id=yelV>100%</em></div>"
-      "<div class=ed-row><span>红墨</span><input type=range id=red min=0 max=220 value=100><em id=redV>100%</em></div>"
-      "<div class=ed-row><span>灰阈</span><input type=range id=chr min=0 max=80 value=8><em id=chrV>8</em></div>"
+      "<div class=ed-row><span>出黑</span><input type=range id=outBlk min=0 max=254 step=1 value=0 title=输出黑场><em id=outBlkV>0</em></div>"
+      "<div class=ed-row><span>出白</span><input type=range id=outWht min=1 max=255 step=1 value=255 title=输出白场><em id=outWhtV>255</em></div>"
+      "<div class=ed-row><span>黄墨</span><input type=range id=yel min=0 max=220 value=100 title=黄墨权重><em id=yelV>100%</em></div>"
+      "<div class=ed-row><span>红墨</span><input type=range id=red min=0 max=220 value=100 title=红墨权重><em id=redV>100%</em></div>"
+      "<div class=ed-row><span>灰阈</span><input type=range id=chr min=0 max=80 value=8 title='低饱和转灰阈值'><em id=chrV>8</em></div>"
       "</div>"
       "</div>"
       "</div>"
@@ -182,8 +185,8 @@ function val(id){return +$(id).value}
 let img=null,packed=null,rules=[],mapTo=-1,selRule=-1,cover=true,tool='pan',grain=true;
 let rulesHist=[],RULES_HIST_MAX=40;
 let mixN=4;
-const MIX_N_LAB={1:'1×1',2:'1×2',3:'√3',4:'2×2'};
-const MIX_N_ALL=[1,2,3,4];
+const MIX_N_LAB={1:'1×1',2:'1×2',3:'√3',4:'2×2',9:'3×3'};
+const MIX_N_ALL=[1,2,3,4,9];
 function cloneRulesState(){return {rules:JSON.parse(JSON.stringify(rules)),selRule:selRule,mixN:mixN};}
 function pushRulesHist(){
   rulesHist.push(cloneRulesState());
@@ -242,14 +245,29 @@ function gammaFromMid(){
   const t=Math.min(0.99,Math.max(0.01,(mid-blk)/Math.max(1,wht-blk)));
   return Math.log(0.5)/Math.log(t);
 }
+function midFromGamma(g){
+  g=Math.max(0.2,Math.min(3,g));
+  const t=Math.pow(0.5,1/g);
+  return Math.round(blk+t*Math.max(1,wht-blk));
+}
+function syncGmaFromMid(){
+  const el=$('gma');
+  if(!el) return;
+  el.value=gammaFromMid().toFixed(2);
+}
+function syncMidFromGma(){
+  mid=Math.max(blk+1,Math.min(wht-1,midFromGamma(val('gma'))));
+}
 function setEm(){
   $('zoomV').textContent=val('zoom')+'%';
   $('brushV').textContent=val('brush');
   $('brtV').textContent=val('brt')+'%';
   $('conV').textContent=val('con')+'%';
+  $('gmaV').textContent=(+val('gma')).toFixed(2);
   $('satV').textContent=val('sat')+'%';
   $('hueV').textContent=val('hue')+'°';
   $('tmpV').textContent=(val('tmp')>0?'+':'')+val('tmp');
+  $('tintV').textContent=(val('tint')>0?'+':'')+val('tint');
   $('yelV').textContent=val('yel')+'%';
   $('redV').textContent=val('red')+'%';
   $('chrV').textContent=val('chr');
@@ -259,7 +277,7 @@ function setEm(){
   $('outWhtV').textContent=outWht;
   $('lvBlk').textContent='黑 '+blk;
   $('lvWht').textContent='白 '+wht;
-  $('lvMid').textContent='γ '+gammaFromMid().toFixed(2);
+  $('lvMid').textContent='γ '+(+val('gma')).toFixed(2);
   fillLevelInputs();
 }
 function fillLevelInputs(){
@@ -330,12 +348,13 @@ function hue2rgb(p,q,t){
 }
 function applyPixel(r,g,b){
   const br=val('brt')/100,co=val('con')/100,sa=val('sat')/100;
-  const hue=val('hue'),tmp=val('tmp'),chTh=val('chr');
-  const gma=Math.max(0.1,gammaFromMid());
+  const hue=val('hue'),tmp=val('tmp'),tint=val('tint'),chTh=val('chr');
+  const gma=Math.max(0.1,val('gma')||gammaFromMid());
   const yb=val('yel')/100,rb=val('red')/100;
   r=r*br;g=g*br;b=b*br;
   r=(r-128)*co+128;g=(g-128)*co+128;b=(b-128)*co+128;
   r+=tmp*1.15;b-=tmp*1.15;
+  if(tint){r-=tint*0.85;g+=tint*1.1;b-=tint*0.85;}
   if(hue||sa!==1){
     let mx=Math.max(r,g,b),mn=Math.min(r,g,b),d=mx-mn,L=(mx+mn)/2,S=0,H=0;
     if(d>1e-3){
@@ -787,6 +806,9 @@ function buildMixes(){
       for(let c=0;c<=mixN-a-b;c++)
         mixList.push([a,b,c,mixN-a-b-c]);
   mixLayout=new Array(mixList.length);
+  const dense=mixN>=9;
+  const wrap=$('wireWrap');
+  if(wrap) wrap.classList.toggle('mix-dense',dense);
   const groups={};
   mixList.forEach(function(cnt,i){
     const p=mixPos(cnt);
@@ -799,7 +821,7 @@ function buildMixes(){
       let ox=0,oy=0;
       if(g.length>1){
         const ang=gi*(Math.PI*2)/g.length-Math.PI/2;
-        const rad=g.length<=2?14:16;
+        const rad=dense?(g.length<=2?8:10):(g.length<=2?14:16);
         ox=Math.cos(ang)*rad;
         oy=Math.sin(ang)*rad;
       }
@@ -1075,6 +1097,7 @@ $('hist').onpointermove=function(e){
   if(histDrag===0){blk=Math.min(x,mid-1); if(blk<0) blk=0;}
   if(histDrag===1){mid=Math.max(blk+1,Math.min(wht-1,x));}
   if(histDrag===2){wht=Math.max(x,mid+1); if(wht>255) wht=255;}
+  syncGmaFromMid();
   setEm();drawHist();schedule(false);
 };
 $('hist').onpointerup=function(e){endHistDrag(e);};
@@ -1088,6 +1111,7 @@ $('hist').onkeydown=function(e){
   if(t===0) blk=Math.max(0,Math.min(mid-1,blk+d));
   if(t===1) mid=Math.max(blk+1,Math.min(wht-1,mid+d));
   if(t===2) wht=Math.max(mid+1,Math.min(255,wht+d));
+  syncGmaFromMid();
   setEm();drawHist();schedule(false);
 };
 $('hist').onkeyup=function(e){
@@ -1100,9 +1124,9 @@ function bindLevel(rangeId,numId,apply){
   $(numId).oninput=function(){go(this.value,false);};
   $(numId).onchange=function(){go(this.value,true);};
 }
-bindLevel('inBlk','inBlkN',function(v){blk=Math.max(0,Math.min(mid-1,v|0));});
-bindLevel('inMid','inMidN',function(v){mid=Math.max(blk+1,Math.min(wht-1,v|0));});
-bindLevel('inWht','inWhtN',function(v){wht=Math.max(mid+1,Math.min(255,v|0));});
+bindLevel('inBlk','inBlkN',function(v){blk=Math.max(0,Math.min(mid-1,v|0));syncGmaFromMid();});
+bindLevel('inMid','inMidN',function(v){mid=Math.max(blk+1,Math.min(wht-1,v|0));syncGmaFromMid();});
+bindLevel('inWht','inWhtN',function(v){wht=Math.max(mid+1,Math.min(255,v|0));syncGmaFromMid();});
 ['outBlk','outWht'].forEach(function(id){
   $(id).oninput=function(){
     outBlk=Math.max(0,Math.min(254,val('outBlk')));
@@ -1111,7 +1135,7 @@ bindLevel('inWht','inWhtN',function(v){wht=Math.max(mid+1,Math.min(255,v|0));});
   };
   $(id).onchange=function(){schedule(true);};
 });
-['zoom','yel','red','brush','brt','con','sat','hue','tmp','chr','dith'].forEach(function(id){
+['zoom','yel','red','brush','brt','con','sat','hue','tmp','tint','chr','dith'].forEach(function(id){
   $(id).oninput=function(){
     setEm();
     if(id==='brush') return;
@@ -1124,6 +1148,14 @@ bindLevel('inWht','inWhtN',function(v){wht=Math.max(mid+1,Math.min(255,v|0));});
     schedule(true);
   };
 });
+$('gma').oninput=function(){
+  syncMidFromGma();
+  setEm();drawHist();schedule(false);
+};
+$('gma').onchange=function(){
+  syncMidFromGma();
+  setEm();drawHist();schedule(true);
+};
 $('tol').oninput=function(){
   setEm();
   if(selRule>=0 && rules[selRule]){
@@ -1140,7 +1172,7 @@ $('tol').onchange=function(){
   }
 };
 const SLIDER_DEF={
-  zoom:100,brush:6,brt:100,con:100,sat:100,hue:0,tmp:0,
+  zoom:100,brush:6,brt:100,con:100,gma:1,sat:100,hue:0,tmp:0,tint:0,
   yel:100,red:100,chr:8,dith:100,tol:36,
   inBlk:0,inMid:128,inWht:255,outBlk:0,outWht:255
 };
@@ -1148,16 +1180,17 @@ function applySliderDefault(id){
   const d=SLIDER_DEF[id];
   if(d==null||!$(id)) return;
   $(id).value=d;
-  if(id==='inBlk'){blk=Math.max(0,Math.min(mid-1,d));fillLevelInputs();}
-  else if(id==='inMid'){mid=Math.max(blk+1,Math.min(wht-1,d));fillLevelInputs();}
-  else if(id==='inWht'){wht=Math.max(mid+1,Math.min(255,d));fillLevelInputs();}
+  if(id==='inBlk'){blk=Math.max(0,Math.min(mid-1,d));syncGmaFromMid();fillLevelInputs();}
+  else if(id==='inMid'){mid=Math.max(blk+1,Math.min(wht-1,d));syncGmaFromMid();fillLevelInputs();}
+  else if(id==='inWht'){wht=Math.max(mid+1,Math.min(255,d));syncGmaFromMid();fillLevelInputs();}
+  else if(id==='gma'){syncMidFromGma();fillLevelInputs();}
   else if(id==='outBlk'){outBlk=d;if(outWht<=outBlk) outWht=Math.min(255,outBlk+1);fillLevelInputs();}
   else if(id==='outWht'){outWht=d;if(outWht<=outBlk) outBlk=Math.max(0,outWht-1);fillLevelInputs();}
   else if(id==='tol'&&selRule>=0&&rules[selRule]){rules[selRule].tol=d;renderRules();}
   setEm();
   if(id==='brush') return;
   if(id==='zoom'){scheduleGeom(true);return;}
-  if(id==='inBlk'||id==='inMid'||id==='inWht') drawHist();
+  if(id==='inBlk'||id==='inMid'||id==='inWht'||id==='gma') drawHist();
   schedule(true);
 }
 Object.keys(SLIDER_DEF).forEach(function(id){
@@ -1190,7 +1223,8 @@ function resetView(){
 }
 function resetSide(){
   blk=0;mid=128;wht=255;outBlk=0;outWht=255;
-  $('brt').value=100;$('con').value=100;$('sat').value=100;$('hue').value=0;$('tmp').value=0;
+  $('brt').value=100;$('con').value=100;$('gma').value=1;$('sat').value=100;
+  $('hue').value=0;$('tmp').value=0;$('tint').value=0;
   $('yel').value=100;$('red').value=100;$('chr').value=8;$('dith').value=100;$('tol').value=36;
   rules=[];selRule=-1;setMapTo(-1);renderRules();setGrain(true,true);fillLevelInputs();
 }
