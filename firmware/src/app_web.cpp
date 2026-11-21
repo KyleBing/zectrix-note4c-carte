@@ -38,7 +38,10 @@ header nav{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0;flex:
 header nav a{display:inline-block;padding:5px 12px;border-radius:999px;font-size:13px;line-height:1.2;color:rgba(255,255,255,.55);text-decoration:none;border:1px solid transparent;background:transparent;transition:background .15s,color .15s,border-color .15s}
 header nav a:hover{color:#fff;background:rgba(255,255,255,.08)}
 header nav a.active{background:#ffcc00;color:#111;border-color:#ffcc00;font-weight:650}
-header .gh{margin-left:auto;display:flex;align-items:center;color:rgba(255,255,255,.7);flex-shrink:0}
+header .meta{margin-left:auto;display:inline-flex;align-items:center;align-self:center;gap:10px;flex-shrink:0;line-height:1;min-height:28px}
+header .meta .ver{font-size:12px;color:rgba(255,255,255,.55);font-variant-numeric:tabular-nums;letter-spacing:.02em;white-space:nowrap;line-height:1;display:inline-flex;align-items:center}
+header .gh{display:inline-flex;align-items:center;justify-content:center;color:rgba(255,255,255,.7);line-height:0}
+header .gh svg{display:block;flex-shrink:0}
 header .gh:hover{color:#fff}
 main{max-width:720px;margin:16px auto;padding:0 16px 28px}
 section{display:block;background:#fff;border-radius:12px;padding:18px 16px;margin-bottom:14px;box-shadow:0 1px 2px rgba(0,0,0,.05)}
@@ -211,7 +214,7 @@ body.page-album main{max-width:none;width:100%;margin:0;padding:0;display:block}
 .ed-saved{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;overflow:visible;padding-bottom:4px}
 .thumb{border:1px solid #ccc;padding:6px;background:#fff;width:auto;min-width:0;box-sizing:border-box}
 .thumb.on{border-color:#111;outline:1px solid #111}
-.thumb.off{opacity:.45}
+.thumb.off{filter:grayscale(1) opacity(.45)}
 .thumb canvas{width:100%;height:auto;aspect-ratio:4/3;image-rendering:pixelated;display:block;background:#fff;cursor:pointer}
 .thumb .row{display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap}
 .thumb .row.meta-row{justify-content:space-between}
@@ -251,7 +254,7 @@ body.page-album main{max-width:none;width:100%;margin:0;padding:0;display:block}
 .led-meta .when{display:block;margin-top:4px;font-size:12px;color:#888}
 @keyframes led-slow{0%,49%{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}50%,100%{background:#1a3d1a;box-shadow:none}}
 @keyframes led-fast{0%,49%{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}50%,100%{background:#1a3d1a;box-shadow:none}}
-@keyframes led-breathe{0%,100%{background:#1a3d1a;box-shadow:none;opacity:1}50%{background:#3dff7a;box-shadow:0 0 12px rgba(61,255,122,.6);opacity:1}}
+@keyframes led-done{0%,12%{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}13%,100%{background:#1a3d1a;box-shadow:none}}
 @keyframes led-boot{0%,8%{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}9%,16%{background:#1a3d1a;box-shadow:none}17%,25%{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}26%,33%{background:#1a3d1a;box-shadow:none}34%,42%{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}43%,100%{background:#1a3d1a;box-shadow:none}}
 @keyframes led-ack{0%,8%{background:#1a3d1a;box-shadow:none}9%,16%{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}17%,25%{background:#1a3d1a;box-shadow:none}26%,33%{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}34%,100%{background:#1a3d1a;box-shadow:none}}
 @keyframes led-error{0%,6%{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}7%,13%{background:#1a3d1a;box-shadow:none}14%,20%{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}21%,27%{background:#1a3d1a;box-shadow:none}28%,34%{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}35%,100%{background:#1a3d1a;box-shadow:none}}
@@ -259,7 +262,7 @@ body.page-album main{max-width:none;width:100%;margin:0;padding:0;display:block}
 .led-anim-solid{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55)}
 .led-anim-slow{animation:led-slow .8s steps(1,end) infinite}
 .led-anim-fast{animation:led-fast .24s steps(1,end) infinite}
-.led-anim-breathe{animation:led-breathe 1.6s ease-in-out infinite}
+.led-anim-done{animation:led-done 1.2s steps(1,end) infinite}
 .led-anim-boot{animation:led-boot 1.6s steps(1,end) infinite}
 .led-anim-ack{animation:led-ack 1.2s steps(1,end) infinite}
 .led-anim-error{animation:led-error 2s steps(1,end) infinite}
@@ -362,11 +365,15 @@ static void sendHtml(NavTab active, const String &body, SendHtmlExtraFn extra = 
     appendNavLink(nav, NavTab::Album, active, "/album", "相册");
     appendNavLink(nav, NavTab::Errors, active, "/errors", "错误");
     appendNavLink(nav, NavTab::Help, active, "/help", "帮助");
-    nav += F("</nav>"
+    nav += F("</nav><div class=meta><span class=ver>");
+    nav += APP_VERSION;
+    nav += F("(");
+    nav += String(APP_BUILD);
+    nav += F(")</span>"
              "<a class=gh href='https://github.com/KyleBing/zectrix-note4c-carte' target=_blank rel=noopener title=GitHub aria-label=GitHub>"
              "<svg viewBox='0 0 16 16' width=22 height=22 fill=currentColor aria-hidden=true>"
              "<path d='M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z'/>"
-             "</svg></a></header><main>");
+             "</svg></a></div></header><main>");
     g_server.sendContent(nav);
   }
 
@@ -974,7 +981,7 @@ static void appendWeatherForm(String &b, const AppConfig &cfg, const WeatherGeoR
     uint32_t d = 0, h = 0, m = 0;
     weatherRefreshToDhm(cfg.weather_refresh_sec, d, h, m);
     b += F("<section><h2>自动刷新</h2>"
-           "<p class=hint>设备开机且未开配置页时，到期会自动拉天气并刷屏。"
+           "<p class=hint>仅当设备<strong>停留在天气 App</strong>且未开配置页时，到期才自动拉数并刷屏；停留在其它 App 时不抢切。"
            "填 <strong>0 天 0 时 0 分</strong> 关闭；开启时合计至少 <strong>1 分钟</strong>。"
            "请把「无操作自动关机」设为关闭或长于本间隔，否则会先睡过去。</p>"
            "<form method=POST action=/weather>"
@@ -1164,7 +1171,7 @@ static void handleHelpGet() {
   row("led-anim-ack", "长按确认两闪", "长按阈值到达时闪两下，可松手；随后执行对应动作。", "UP≈1.5s 开 Web · DOWN≈3s 关机");
   row("led-anim-slow", "慢闪", "约 400ms 亮灭交替。", "正在连 WiFi / 启动配置网页");
   row("led-anim-fast", "快闪", "约 120ms 亮灭交替。", "网络拉取等短时忙碌（如有）");
-  row("led-anim-breathe", "呼吸", "约 1.6s 周期由暗到亮再暗。", "墨水屏全刷页面期间");
+  row("led-anim-done", "刷完一闪", "全刷结束后短亮一下再灭；刷屏过程中不闪灯。", "切 App / BOOT 刷新 / 定时刷新完成");
   row("led-anim-double", "双脉冲", "两短亮一停，重复约 3 次后自动灭。", "配置 Web / 热点就绪提示");
   row("led-anim-error", "三短闪（失败）", "连续三下短亮，约 2s 内结束并熄灭。", "刷屏失败、开网页失败等");
   row("off", "熄灭", "无图案时灯关闭。", "空闲待机");
@@ -1172,7 +1179,7 @@ static void handleHelpGet() {
   b += F("</ul></section>");
   b += F("<section><h2>怎么记</h2>"
          "<p class=hint style=margin:0>按下有灯 → 松开看图案。"
-         "慢闪在联网，呼吸在刷屏，三短闪是出错，上电三闪表示已开机。</p></section>");
+         "慢闪在联网，刷完一闪表示页面已更新，三短闪是出错，上电三闪表示已开机。</p></section>");
   sendHtml(NavTab::Help, b);
 }
 

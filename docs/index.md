@@ -26,7 +26,7 @@ features:
   - title: 多 App + Web 配网
     details: 待办 / 日历 / 天气 / 相册；长按上键开配置站；Portal 登录与和风代理
   - title: 按键与 LED 语义
-    details: UP/DOWN 切 App，BOOT 只做页内动作；呼吸刷屏、三短闪失败，详见行为机制
+    details: UP/DOWN 切 App，BOOT 只做页内动作；刷完一闪、三短闪失败，详见行为机制
   - title: 错误可追溯
     details: 墨水屏显示错误详情；事件写入 LittleFS，Web /errors 可查看与清空
   - title: 熟悉工具链

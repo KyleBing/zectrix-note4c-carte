@@ -1257,11 +1257,18 @@ async function refreshList(){
     el.querySelectorAll('[data-del]').forEach(function(btn){
       btn.onclick=async function(ev){
         ev.stopPropagation();
-        if(!confirm('删除 '+btn.dataset.del+' ?')) return;
-        await fetch('/album/delete?name='+encodeURIComponent(btn.dataset.del),{method:'POST'});
-        if(editName===btn.dataset.del) editName='';
-        toast('已删除 '+btn.dataset.del);
-        refreshList();
+        const name=btn.dataset.del;
+        if(!confirm('删除 '+name+' ?')) return;
+        try{
+          const r=await fetch('/album/delete?name='+encodeURIComponent(name),{method:'POST'});
+          if(!r.ok) throw new Error(await r.text());
+          if(editName===name) editName='';
+          const card=btn.closest('.thumb');
+          if(card) card.remove();
+          if(!el.querySelector('.thumb')) el.innerHTML='<p class=meta>(还没有照片)</p>';
+          toast('已删除 '+name);
+          syncSelAll();
+        }catch(e){toast('删除失败：'+e,true);}
       };
     });
     el.querySelectorAll('[data-show]').forEach(function(cb){
@@ -1329,13 +1336,21 @@ $('showHeader').onchange=async function(){
 $('selAll').onchange=async function(){
   const show=this.checked?1:0;
   this.indeterminate=false;
+  const cbs=[].slice.call(document.querySelectorAll('#list [data-show]'));
+  cbs.forEach(function(cb){
+    cb.checked=!!show;
+    const card=cb.closest('.thumb');
+    if(card) card.classList.toggle('off',!show);
+  });
   toast(show?'正在全选展示…':'正在全部取消展示…');
   try{
     const r=await fetch('/album/show-all?show='+show,{method:'POST'});
     if(!r.ok) throw new Error(await r.text());
     toast(show?'已全部展示':'已全部取消展示');
+  }catch(e){
+    toast(String(e),true);
     refreshList();
-  }catch(e){toast(String(e),true);}
+  }
 };
 paint.fill(-1);
 buildMixes();

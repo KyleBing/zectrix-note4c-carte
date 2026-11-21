@@ -1,4 +1,5 @@
 #include "app_calendar.h"
+#include "app_apps.h"
 #include "app_config.h"
 #include "app_font.h"
 #include "app_header.h"
@@ -10,7 +11,29 @@
 #include "app_errorlog.h"
 
 #include <cstdio>
+#include <ctime>
 #include <cstring>
+
+// 上次成功绘制的本地 YYYYMMDD；-1 = 本会话尚未画过
+static int g_cal_drawn_ymd = -1;
+
+static int ymdFromParts(int y, int m, int d) { return y * 10000 + m * 100 + d; }
+
+static int localYmdNow() {
+  const time_t now = time(nullptr);
+  if (now < 1700000000) return -1;
+  struct tm ti;
+  if (!localtime_r(&now, &ti)) return -1;
+  return ymdFromParts(ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday);
+}
+
+bool calendarAutoRefreshDue() {
+  if (!appIdEnabled(AppId::Calendar)) return false;
+  if (g_cal_drawn_ymd < 0) return false;
+  const int today = localYmdNow();
+  if (today < 0) return false;
+  return today != g_cal_drawn_ymd;
+}
 
 static int daysInMonth(int y, int m) {
   static const int k[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
@@ -257,5 +280,6 @@ bool calendarShow(EpdSsd2683 &epd) {
   }
 
   epd.display();
+  g_cal_drawn_ymd = ymdFromParts(now.year, now.month, now.day);
   return true;
 }

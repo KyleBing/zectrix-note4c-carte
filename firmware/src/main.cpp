@@ -9,7 +9,7 @@
  *   DOWN hold ~3s    → power off
  *   BOOT release     → in-app ONLY (never switches App)
  *
- * LED: 按键按下即亮、松开即灭；长按阈值到达时闪两下（可松手）；刷屏呼吸；慢闪连 WiFi；失败三短闪
+ * LED: 按键按下即亮、松开即灭；长按阈值到达时闪两下（可松手）；刷屏过程不亮，完成后一闪；慢闪连 WiFi；失败三短闪
  */
 
 #include <Arduino.h>
@@ -369,9 +369,11 @@ void loop() {
   }
 
   auto finishAction = [&](bool ok) {
-    ledSet(ok ? LedPattern::Off : LedPattern::ErrorBurst);
     persistUi();
-    if (ledGet() == LedPattern::ErrorBurst) {
+    if (ok) {
+      ledDoneFlash();
+    } else {
+      ledSet(LedPattern::ErrorBurst);
       const uint32_t t = millis();
       while (millis() - t < 1800) {
         ledUpdate();
@@ -388,23 +390,28 @@ void loop() {
     busy = false;
   };
 
-  // 天气间隔自动刷新（配置页不计；需有效 RTC 时间）
-  if (!in_web && !busy && !boot && !up && weatherAutoRefreshDue()) {
-    busy = true;
-    ledSet(LedPattern::Breathe);
-    const AppId was = g_app;
-    g_app = AppId::Weather;
-    Serial.printf("[UI] weather auto-refresh (was %s, every %u s)\n", appIdName(was),
-                  (unsigned)getAppConfig().weather_refresh_sec);
-    const bool ok = showCurrentApp(false);
-    finishAction(ok);
-    return;
+  // App 定时任务：仅当「停留在对应 App」时才跑（配置页 / 按键忙碌不计）
+  if (!in_web && !busy && !boot && !up) {
+    if (g_app == AppId::Weather && weatherAutoRefreshDue()) {
+      busy = true;
+      Serial.printf("[UI] weather auto-refresh (every %u s)\n",
+                    (unsigned)getAppConfig().weather_refresh_sec);
+      const bool ok = showCurrentApp(false);
+      finishAction(ok);
+      return;
+    }
+    if (g_app == AppId::Calendar && calendarAutoRefreshDue()) {
+      busy = true;
+      Serial.println("[UI] calendar midnight auto-refresh");
+      const bool ok = showCurrentApp(false);
+      finishAction(ok);
+      return;
+    }
   }
 
   if (in_web) {
     if (powerTakeBootClicksNow()) {
       busy = true;
-      ledSet(LedPattern::Breathe);
       Serial.println("[UI] BOOT -> exit web");
       webStop();
       // 配置里关掉了当前 App：跟 showCurrentApp 一样落到第一个可用的，不要再还原回去
@@ -423,7 +430,6 @@ void loop() {
     const uint8_t n = powerTakeBootBurst();
     if (n) {
       busy = true;
-      ledSet(LedPattern::Breathe);
       // 会话若仍指着已禁用 App（旧 bug 残留），先对齐再处理 BOOT
       if (!appIdEnabled(g_app)) {
         const AppId was = g_app;
@@ -499,9 +505,20 @@ void loop() {
         Serial.println("[UI] WiFi failed, restore AP");
         ok = webStart(true);
       }
-      ledSet(ok ? LedPattern::Breathe : LedPattern::ErrorBurst);
+      if (!ok) ledSet(LedPattern::ErrorBurst);
       drawConfigWebPage(ok);
-      ledSet(ok ? LedPattern::Off : LedPattern::ErrorBurst);
+      if (ok) {
+        ledDoneFlash();
+      } else {
+        ledSet(LedPattern::ErrorBurst);
+        const uint32_t t = millis();
+        while (millis() - t < 1800) {
+          ledUpdate();
+          powerPoll(false);
+          delay(10);
+        }
+        ledOff();
+      }
       suppressKeys(500);
       busy = false;
       up_prev = digitalRead(PIN_BTN_UP) == LOW;
@@ -525,7 +542,6 @@ void loop() {
     const uint8_t n = up_clicks;
     up_clicks = 0;
     busy = true;
-    ledSet(LedPattern::Breathe);
     skipApps(-(int)n);
     Serial.printf("[UI] UP x%u -> %s\n", (unsigned)n, appIdName(g_app));
     const bool ok = showCurrentApp(false);
@@ -538,7 +554,6 @@ void loop() {
     const uint8_t n = powerTakeDownBurst();
     if (n) {
       busy = true;
-      ledSet(LedPattern::Breathe);
       skipApps((int)n);
       Serial.printf("[UI] DOWN x%u -> %s\n", (unsigned)n, appIdName(g_app));
       const bool ok = showCurrentApp(false);

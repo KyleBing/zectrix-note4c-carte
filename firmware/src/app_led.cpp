@@ -46,6 +46,15 @@ void ledAckFlash() {
   }
 }
 
+void ledDoneFlash() {
+  g_pat = LedPattern::Off;
+  g_last_level = -1;
+  ledWrite(true);
+  delay(140);
+  g_last_level = -1;
+  ledWrite(false);
+}
+
 void ledBootFlash() {
   g_pat = LedPattern::Off;
   for (int i = 0; i < 3; i++) {
