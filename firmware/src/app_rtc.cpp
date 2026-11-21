@@ -211,3 +211,116 @@ int rtcDaysSinceNtp() {
   if (now < 1700000000) return -1;
   return (int)(((uint32_t)now - last) / 86400UL);
 }
+
+static bool rtcWriteReg(uint8_t reg, uint8_t val) {
+  Wire.beginTransmission(I2C_ADDR_RTC);
+  Wire.write(reg);
+  Wire.write(val);
+  return Wire.endTransmission(true) == 0;
+}
+
+static bool rtcReadReg(uint8_t reg, uint8_t &val) {
+  Wire.beginTransmission(I2C_ADDR_RTC);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom((int)I2C_ADDR_RTC, 1) != 1) return false;
+  val = Wire.read();
+  return true;
+}
+
+bool rtcAlarmFired() {
+  uint8_t st2 = 0;
+  if (!rtcReadReg(0x01, st2)) return false;
+  return (st2 & 0x08) != 0;  // AF
+}
+
+bool rtcAlarmClear() {
+  uint8_t st2 = 0;
+  rtcReadReg(0x01, st2);
+  // 写 AND：AF/TF 写 0 清除；关 AIE/TIE
+  st2 &= (uint8_t)~0x0F;  // clear AF TF AIE TIE
+  if (!rtcWriteReg(0x01, st2)) return false;
+  // 禁用所有闹钟域（AE=1）
+  rtcWriteReg(0x09, 0x80);
+  rtcWriteReg(0x0A, 0x80);
+  rtcWriteReg(0x0B, 0x80);
+  rtcWriteReg(0x0C, 0x80);
+  return true;
+}
+
+bool rtcAlarmSetLocal(int year, int month, int day, int hour, int minute) {
+  if (year < 2000 || month < 1 || month > 12 || day < 1 || day > 31) return false;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return false;
+
+  // 先清标志
+  uint8_t st2 = 0;
+  rtcReadReg(0x01, st2);
+  st2 &= (uint8_t)~0x0C;  // clear AF TF, keep enable bits for now
+  rtcWriteReg(0x01, st2);
+
+  // minute / hour / day 使能（bit7 AE=0）；weekday 禁用（AE=1）
+  if (!rtcWriteReg(0x09, binToBcd((uint8_t)minute) & 0x7F)) return false;
+  if (!rtcWriteReg(0x0A, binToBcd((uint8_t)hour) & 0x3F)) return false;
+  if (!rtcWriteReg(0x0B, binToBcd((uint8_t)day) & 0x3F)) return false;
+  if (!rtcWriteReg(0x0C, 0x80)) return false;
+
+  // 开 AIE，清 AF/TF
+  st2 = 0;
+  rtcReadReg(0x01, st2);
+  st2 &= (uint8_t)~0x0C;
+  st2 |= 0x02;  // AIE
+  if (!rtcWriteReg(0x01, st2)) return false;
+
+  Serial.printf("[RTC] alarm %04d-%02d-%02d %02d:%02d\n", year, month, day, hour, minute);
+  return true;
+}
+
+static bool rtcAlarmLineIdle() {
+  pinMode(PIN_RTC_INT, INPUT_PULLUP);
+  delay(12);
+  const bool af = rtcAlarmFired();
+  const bool low = digitalRead(PIN_RTC_INT) == LOW;
+  if (af || low) {
+    Serial.printf("[RTC] alarm still asserted af=%d int=%d\n", (int)af, (int)low);
+    return false;
+  }
+  return true;
+}
+
+bool rtcAlarmSetUnix(time_t wake) {
+  if (wake < 1700000000) return false;
+
+  // 闹钟只有分钟精度：目标分钟已经到了，AF/INT 会立刻再拉低 → 关机后连刷。
+  RtcDateTime cur{};
+  const bool have_rtc = readPcf8563(cur);
+  for (int n = 0; n < 10; n++) {
+    if (have_rtc && n > 0 && !readPcf8563(cur)) break;
+    struct tm t;
+    if (!localtime_r(&wake, &t)) return false;
+    const int wy = t.tm_year + 1900;
+    const int wm = t.tm_mon + 1;
+    const int wd = t.tm_mday;
+    const int wh = t.tm_hour;
+    const int wmin = t.tm_min;
+    if (have_rtc) {
+      const bool not_after =
+          wy < cur.year ||
+          (wy == cur.year &&
+           (wm < cur.month ||
+            (wm == cur.month &&
+             (wd < cur.day ||
+              (wd == cur.day && (wh < cur.hour || (wh == cur.hour && wmin <= cur.minute)))))));
+      if (not_after) {
+        wake += 60;
+        continue;
+      }
+    }
+    if (!rtcAlarmSetLocal(wy, wm, wd, wh, wmin)) return false;
+    if (rtcAlarmLineIdle()) return true;
+    wake += 60;
+  }
+
+  Serial.println("[RTC] alarm could not idle INT");
+  rtcAlarmClear();
+  return false;
+}

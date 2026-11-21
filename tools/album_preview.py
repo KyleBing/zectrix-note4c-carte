@@ -25,7 +25,6 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB_CPP = ROOT / "firmware" / "src" / "app_web.cpp"
 ALBUM_CPP = ROOT / "firmware" / "src" / "app_web_album.cpp"
 FAVICON = ROOT / "firmware" / "data" / "favicon.svg"
-ALBUM_MAX = 30
 FRAME = 30000
 
 STRING_RE = re.compile(r'"(?:\\.|[^"\\])*"')
@@ -73,8 +72,7 @@ def build_album_html() -> str:
     js_at = album.find('R"ALBUMJS(', fn)
     if fn < 0 or js_at < 0:
         raise SystemExit("webAlbumAppendPage / ALBUMJS not found")
-    html_src = album[fn:js_at].replace("String(ALBUM_MAX)", '"30"')
-    body = extract_quoted(html_src)
+    body = extract_quoted(album[fn:js_at])
     script = extract_raw(album, "ALBUMJS")
     return (
         "<!DOCTYPE html><html><head><meta charset=utf-8>"
@@ -105,7 +103,7 @@ class AlbumStore:
             {
                 "files": [{"name": n, "show": s} for n, _, s in self.files],
                 "count": len(self.files),
-                "max": ALBUM_MAX,
+                "max": 0,
                 "show_header": self.show_header,
             }
         ).encode()
@@ -132,20 +130,17 @@ class AlbumStore:
         self.files = [(n, d, show) for n, d, _ in self.files]
 
     def next_name(self) -> str:
-        used = {n for n, _, _ in self.files}
-        for i in range(1, ALBUM_MAX + 1):
-            name = f"{i:03d}.2bp"
-            if name not in used:
-                return name
-        raise RuntimeError("album full")
+        max_n = 0
+        for n, _, _ in self.files:
+            try:
+                max_n = max(max_n, int(n.split(".", 1)[0]))
+            except ValueError:
+                pass
+        return f"{max_n + 1:03d}.2bp"
 
     def put(self, data: bytes, name: str | None) -> str:
         if len(data) != FRAME:
             raise ValueError(f"bad size {len(data)}")
-        if len(self.files) >= ALBUM_MAX and not (
-            name and any(n == name for n, _, _ in self.files)
-        ):
-            raise RuntimeError("album full")
         if not name:
             name = self.next_name()
         for i, (n, _, shown) in enumerate(self.files):
@@ -222,6 +217,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if u.path == "/album/header":
                 STORE.show_header = q.get("show", ["0"])[0] == "1"
+                self._text(200, "ok")
+                return
+            if u.path == "/album/schedule":
+                # 本机预览只吃请求，不落盘；与固件同返回 ok，避免整页跳转
                 self._text(200, "ok")
                 return
             if u.path == "/album/show":

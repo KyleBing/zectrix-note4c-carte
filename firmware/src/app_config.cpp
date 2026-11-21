@@ -14,10 +14,13 @@ static void clearConfig() {
   strncpy(g_cfg.portal_base_url, "https://kylebing.cn/portal", sizeof(g_cfg.portal_base_url) - 1);
   g_cfg.idle_off_on_power = false;
   g_cfg.album_show_header = true;
+  g_cfg.album_refresh_en = false;
+  g_cfg.album_refresh_sec = 3600;
   g_cfg.week_start_monday = true;
   g_cfg.tz_offset_min = 480;  // UTC+8
   g_cfg.ntp_interval_days = 30;
-  g_cfg.weather_refresh_sec = 0;
+  g_cfg.weather_refresh_en = false;
+  g_cfg.weather_refresh_sec = 3600;
   g_cfg.apps_enabled = appsEnabledDefaultMask();
 }
 
@@ -106,6 +109,10 @@ int loadSplashBuild() {
 void saveSplashBuild(int build) {
   g_prefs.putInt("splash_b", build);
 }
+
+bool loadScheduledSleep() { return g_prefs.getBool("sched_slp", false); }
+
+void saveScheduledSleep(bool on) { g_prefs.putBool("sched_slp", on); }
 
 bool upsertAppConfigWifi(const char *ssid, const char *password, bool set_active) {
   if (!ssid || !ssid[0]) return false;
@@ -296,8 +303,15 @@ bool qweatherConfigured() {
          g_cfg.portal_base_url[0];
 }
 
-static constexpr uint32_t kWeatherRefreshMinSec = 60;
-static constexpr uint32_t kWeatherRefreshMaxSec = 365UL * 86400UL;
+static constexpr uint32_t kRefreshMinSec = 60;
+static constexpr uint32_t kRefreshMaxSec = 365UL * 86400UL;
+static constexpr uint32_t kRefreshDefaultSec = 3600;
+
+static uint32_t clampRefreshSec(uint32_t sec) {
+  if (sec < kRefreshMinSec) sec = kRefreshMinSec;
+  if (sec > kRefreshMaxSec) sec = kRefreshMaxSec;
+  return sec;
+}
 
 uint32_t weatherRefreshSecFromDhm(uint32_t days, uint32_t hours, uint32_t minutes) {
   if (hours > 23) hours = 23;
@@ -305,13 +319,12 @@ uint32_t weatherRefreshSecFromDhm(uint32_t days, uint32_t hours, uint32_t minute
   if (days > 365) days = 365;
   const uint64_t sec =
       (uint64_t)days * 86400ULL + (uint64_t)hours * 3600ULL + (uint64_t)minutes * 60ULL;
-  if (sec == 0) return 0;
-  if (sec < kWeatherRefreshMinSec) return kWeatherRefreshMinSec;
-  if (sec > kWeatherRefreshMaxSec) return kWeatherRefreshMaxSec;
-  return (uint32_t)sec;
+  if (sec == 0) return kRefreshDefaultSec;
+  return clampRefreshSec((uint32_t)sec);
 }
 
 void weatherRefreshToDhm(uint32_t sec, uint32_t &days, uint32_t &hours, uint32_t &minutes) {
+  if (sec == 0) sec = kRefreshDefaultSec;
   days = sec / 86400UL;
   sec %= 86400UL;
   hours = sec / 3600UL;
@@ -319,12 +332,16 @@ void weatherRefreshToDhm(uint32_t sec, uint32_t &days, uint32_t &hours, uint32_t
   minutes = sec / 60UL;
 }
 
-bool saveWeatherRefreshSec(uint32_t sec) {
-  if (sec != 0) {
-    if (sec < kWeatherRefreshMinSec) sec = kWeatherRefreshMinSec;
-    if (sec > kWeatherRefreshMaxSec) sec = kWeatherRefreshMaxSec;
+bool saveWeatherRefreshEn(bool en) {
+  g_cfg.weather_refresh_en = en;
+  if (en && g_cfg.weather_refresh_sec < kRefreshMinSec) {
+    g_cfg.weather_refresh_sec = kRefreshDefaultSec;
   }
-  g_cfg.weather_refresh_sec = sec;
+  return saveAppConfig();
+}
+
+bool saveWeatherRefreshSec(uint32_t sec) {
+  g_cfg.weather_refresh_sec = clampRefreshSec(sec == 0 ? kRefreshDefaultSec : sec);
   return saveAppConfig();
 }
 
@@ -336,14 +353,47 @@ uint32_t loadWeatherLastUnix() {
 void saveWeatherLastUnix(uint32_t unix_sec) { g_prefs.putUInt("wx_last", unix_sec); }
 
 bool weatherAutoRefreshDue() {
+  if (!g_cfg.weather_refresh_en) return false;
   const uint32_t iv = g_cfg.weather_refresh_sec;
-  if (iv < kWeatherRefreshMinSec) return false;
+  if (iv < kRefreshMinSec) return false;
   if (!qweatherConfigured()) return false;
   if (!appIdEnabled(AppId::Weather)) return false;
   const time_t now = time(nullptr);
-  if (now < 1700000000) return false;  // 无有效时间则不瞎刷
+  if (now < 1700000000) return false;
   const uint32_t last = loadWeatherLastUnix();
-  if (last == 0) return false;  // 尚未成功刷过：等用户先手动打开一次天气
+  if (last == 0) return false;
+  return (uint32_t)now >= last + iv;
+}
+
+bool saveAlbumRefreshEn(bool en) {
+  g_cfg.album_refresh_en = en;
+  if (en && g_cfg.album_refresh_sec < kRefreshMinSec) {
+    g_cfg.album_refresh_sec = kRefreshDefaultSec;
+  }
+  return saveAppConfig();
+}
+
+bool saveAlbumRefreshSec(uint32_t sec) {
+  g_cfg.album_refresh_sec = clampRefreshSec(sec == 0 ? kRefreshDefaultSec : sec);
+  return saveAppConfig();
+}
+
+uint32_t loadAlbumLastUnix() {
+  if (!g_prefs.isKey("alb_last")) return 0;
+  return g_prefs.getUInt("alb_last", 0);
+}
+
+void saveAlbumLastUnix(uint32_t unix_sec) { g_prefs.putUInt("alb_last", unix_sec); }
+
+bool albumAutoRefreshDue() {
+  if (!g_cfg.album_refresh_en) return false;
+  const uint32_t iv = g_cfg.album_refresh_sec;
+  if (iv < kRefreshMinSec) return false;
+  if (!appIdEnabled(AppId::Album)) return false;
+  const time_t now = time(nullptr);
+  if (now < 1700000000) return false;
+  const uint32_t last = loadAlbumLastUnix();
+  if (last == 0) return false;
   return (uint32_t)now >= last + iv;
 }
 
@@ -384,10 +434,13 @@ String appConfigToJson(bool mask_secrets) {
   }
   qw["location_id"] = g_cfg.qweather_location_id;
   qw["location_name"] = g_cfg.qweather_location_name;
+  qw["refresh_en"] = g_cfg.weather_refresh_en;
   qw["refresh_sec"] = g_cfg.weather_refresh_sec;
   doc["idle_off_sec"] = g_cfg.idle_off_sec;
   doc["idle_off_on_power"] = g_cfg.idle_off_on_power;
   doc["album_show_header"] = g_cfg.album_show_header;
+  doc["album_refresh_en"] = g_cfg.album_refresh_en;
+  doc["album_refresh_sec"] = g_cfg.album_refresh_sec;
   doc["week_start_monday"] = g_cfg.week_start_monday;
   doc["tz_offset_min"] = g_cfg.tz_offset_min;
   doc["ntp_interval_days"] = g_cfg.ntp_interval_days;
@@ -456,16 +509,25 @@ bool appConfigFromJson(const char *json) {
             sizeof(g_cfg.qweather_location_name) - 1);
     if (qw["refresh_sec"].is<uint32_t>() || qw["refresh_sec"].is<int>()) {
       uint32_t sec = (uint32_t)(qw["refresh_sec"] | 0);
-      if (sec != 0) {
-        if (sec < 60) sec = 60;
-        if (sec > 365UL * 86400UL) sec = 365UL * 86400UL;
+      if (sec == 0) {
+        // 旧配置：0 = 关 → 开关关，间隔保留默认
+        g_cfg.weather_refresh_en = false;
+        g_cfg.weather_refresh_sec = kRefreshDefaultSec;
+      } else {
+        g_cfg.weather_refresh_sec = clampRefreshSec(sec);
+        if (qw["refresh_en"].is<bool>()) {
+          g_cfg.weather_refresh_en = qw["refresh_en"].as<bool>();
+        } else {
+          g_cfg.weather_refresh_en = true;  // 旧配置有间隔即视为开
+        }
       }
-      g_cfg.weather_refresh_sec = sec;
     } else {
-      g_cfg.weather_refresh_sec = 0;
+      g_cfg.weather_refresh_sec = kRefreshDefaultSec;
+      g_cfg.weather_refresh_en = qw["refresh_en"] | false;
     }
   } else {
-    g_cfg.weather_refresh_sec = 0;
+    g_cfg.weather_refresh_sec = kRefreshDefaultSec;
+    g_cfg.weather_refresh_en = false;
   }
 
   g_cfg.idle_off_sec = doc["idle_off_sec"] | 0;
@@ -478,6 +540,17 @@ bool appConfigFromJson(const char *json) {
     g_cfg.album_show_header = doc["album_show_header"].as<bool>();
   } else {
     g_cfg.album_show_header = true;
+  }
+  if (doc["album_refresh_en"].is<bool>()) {
+    g_cfg.album_refresh_en = doc["album_refresh_en"].as<bool>();
+  } else {
+    g_cfg.album_refresh_en = false;
+  }
+  if (doc["album_refresh_sec"].is<uint32_t>() || doc["album_refresh_sec"].is<int>()) {
+    uint32_t sec = (uint32_t)(doc["album_refresh_sec"] | 0);
+    g_cfg.album_refresh_sec = clampRefreshSec(sec == 0 ? kRefreshDefaultSec : sec);
+  } else {
+    g_cfg.album_refresh_sec = kRefreshDefaultSec;
   }
   if (doc["week_start_monday"].is<bool>()) {
     g_cfg.week_start_monday = doc["week_start_monday"].as<bool>();

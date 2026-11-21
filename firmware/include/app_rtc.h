@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <time.h>
 
 struct RtcDateTime {
   bool ok = false;
@@ -37,3 +38,9 @@ bool rtcSyncIfDue(uint32_t timeout_ms = 6000);
 
 uint32_t rtcLastNtpUnix();  // 0 = never
 int rtcDaysSinceNtp();      // -1 = unknown/never
+
+// PCF8563 闹钟（INT → GPIO5）。时间均为本地墙钟。
+bool rtcAlarmClear();                 // 清 AF/TF，关 AIE
+bool rtcAlarmFired();                 // Control2.AF
+bool rtcAlarmSetUnix(time_t wake);    // 设到 wake（本地）；失败返回 false
+bool rtcAlarmSetLocal(int year, int month, int day, int hour, int minute);

@@ -34,6 +34,11 @@ void ledOff() {
   ledWrite(false);
 }
 
+void ledHoldOffForSleep() {
+  ledOff();
+  gpio_hold_en((gpio_num_t)PIN_LED);
+}
+
 void ledAckFlash() {
   // Key-hold path keeps the LED solid on; two dark pulses cut through that.
   for (int i = 0; i < 2; i++) {

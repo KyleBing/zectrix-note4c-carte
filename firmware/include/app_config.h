@@ -33,6 +33,8 @@ struct AppConfig {
   uint32_t idle_off_sec;  // 无操作自动关机秒数；0=关闭。Web 配置期间不关
   bool idle_off_on_power; // 连接电源（充电/充满）时是否仍执行空闲关机；默认 false
   bool album_show_header; // 设备相册展示时是否叠标题栏；默认 true
+  bool album_refresh_en;  // 相册定时翻页 / 关机定时醒；默认 false
+  uint32_t album_refresh_sec; // 相册翻页间隔秒；开启时至少 60；默认 3600
   bool week_start_monday; // 日历一周起始：true=周一，false=周日；默认 true
   int16_t tz_offset_min;  // 时区相对 UTC 分钟数；默认 480（UTC+8）
   uint16_t ntp_interval_days; // NTP 周期天数；默认 30（复位后仍会校一次）
@@ -45,7 +47,8 @@ struct AppConfig {
   char qweather_key[QW_KEY_MAX];
   char qweather_location_id[QW_LOC_ID_MAX];
   char qweather_location_name[QW_LOC_NAME_MAX];
-  uint32_t weather_refresh_sec;  // 自动刷新间隔秒；0=关闭；开启时至少 60
+  bool weather_refresh_en;       // 天气定时刷新 / 关机定时醒；默认 false
+  uint32_t weather_refresh_sec;  // 间隔秒；开启时至少 60；默认 3600
 
   bool loaded;
 };
@@ -66,14 +69,22 @@ bool saveDiaryId(const char *id);
 bool saveQWeatherConfig(bool enabled, const char *host, const char *key, const char *loc_id,
                         const char *loc_name);
 bool qweatherConfigured();
-// 0 = 关闭；非 0 时钳到 [60, 365 天]
+bool saveWeatherRefreshEn(bool en);
+// 间隔钳到 [60, 365 天]；开关关闭时仍可改间隔
 bool saveWeatherRefreshSec(uint32_t sec);
 uint32_t weatherRefreshSecFromDhm(uint32_t days, uint32_t hours, uint32_t minutes);
 void weatherRefreshToDhm(uint32_t sec, uint32_t &days, uint32_t &hours, uint32_t &minutes);
 // 上次成功刷新的 unix 秒（NVS）；0 = 未知
 uint32_t loadWeatherLastUnix();
 void saveWeatherLastUnix(uint32_t unix_sec);
-bool weatherAutoRefreshDue();  // 配置了间隔且已到期（需有效系统时间）
+bool weatherAutoRefreshDue();  // 开关开 + 间隔到期（需有效系统时间）
+
+bool saveAlbumRefreshEn(bool en);
+bool saveAlbumRefreshSec(uint32_t sec);
+uint32_t loadAlbumLastUnix();
+void saveAlbumLastUnix(uint32_t unix_sec);
+bool albumAutoRefreshDue();
+
 bool saveIdleOffSec(uint32_t sec);
 bool saveIdleOffOnPower(bool on);
 bool saveAlbumShowHeader(bool show);
@@ -96,3 +107,7 @@ bool loadUiSession(uint8_t &app_id, uint8_t &weather_mode, int &album_index);
 // 刷机首屏：已展示过的 APP_BUILD；未见过则返回 -1
 int loadSplashBuild();
 void saveSplashBuild(int build);
+
+// 定时深睡标记：睡前写入；仅「下键交互开机」清除。用于唤醒原因丢失时仍走刷完再睡。
+bool loadScheduledSleep();
+void saveScheduledSleep(bool on);

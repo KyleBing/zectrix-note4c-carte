@@ -120,7 +120,7 @@ void webAlbumAppendPage(String &b) {
       "</div>"
       "<div class=ed-side-ops>"
       "<div class=ed-block>"
-      "<div class=ink-hist-wrap><canvas id=inkHist width=320 height=48></canvas></div>"
+      "<div class=hist-wrap><canvas id=inkHist width=1024 height=160></canvas></div>"
       "<div class=ink-hist-read>"
       "<span id=ink0>黑 —</span><span id=ink1>白 —</span><span id=ink2>黄 —</span><span id=ink3>红 —</span>"
       "</div>"
@@ -134,9 +134,6 @@ void webAlbumAppendPage(String &b) {
       "<div class=ed-row id=dithRow><span>颗粒</span><input type=range id=dith min=20 max=160 value=100 title=抖动强度><em id=dithV>100%</em></div>"
       "</div>"
       "<div class=ed-levels>"
-      "<div class=ed-side-h>"
-      "<h3>色阶</h3>"
-      "</div>"
       "<div class=ed-block>"
       "<div class=hist-wrap><canvas id=hist width=1024 height=160 tabindex=0></canvas></div>"
       "<div class=hist-read><span id=lvBlk>黑 0</span><span id=lvMid>γ 1.00</span><span id=lvWht>白 255</span></div>"
@@ -157,19 +154,49 @@ void webAlbumAppendPage(String &b) {
       "</aside>"
       "</div></div>"
       "<div id=toast class=ed-toast></div>"
-      "<div class=ed-album>"
-      "<div class=ed-album-h>"
-      "<h2>相册</h2>"
-      "<p class=hint style=margin:0>最多 ");
-  b += String(ALBUM_MAX);
-  b += F(" 张 · 取消展示后设备不翻到该图</p>"
-         "<button type=button id=btnExportAll class=secondary>批量导出</button>"
+      "<div class=ed-album>");
+
+  b += F("<div class=ed-album-bar>");
+  {
+    const AppConfig &ac = getAppConfig();
+    uint32_t d = 0, h = 0, m = 0;
+    weatherRefreshToDhm(ac.album_refresh_sec, d, h, m);
+    b += F("<div class=ed-album-panel>"
+           "<h3>设备</h3>"
+           "<label class=ed-sw><input type=checkbox id=showHeader");
+    if (ac.album_show_header) b += F(" checked");
+    b += F("><span>标题栏</span></label>"
+           "<form id=albumSched method=POST action=/album/schedule class=ed-album-sched>"
+           "<label class=ed-sw><input type=checkbox name=refresh_en value=1");
+    if (ac.album_refresh_en) b += F(" checked");
+    b += F("><span>定时翻页</span></label>"
+           "<span class=ed-dhm>"
+           "<label><input name=refresh_d type=number min=0 max=365 step=1 value=");
+    b += String(d);
+    b += F(">天</label>"
+           "<label><input name=refresh_h type=number min=0 max=23 step=1 value=");
+    b += String(h);
+    b += F(">时</label>"
+           "<label><input name=refresh_m type=number min=0 max=59 step=1 value=");
+    b += String(m);
+    b += F(">分</label></span>"
+           "<button type=submit>保存</button></form>"
+           "</div>");
+  }
+
+  b += F("<div class=ed-album-panel>"
+         "<h3>管理</h3>"
+         "<div class=ed-album-acts>"
+         "<label class=ed-album-import><input type=file id=pickBatch accept='image/*,.2bp,application/octet-stream' multiple>导入</label>"
+         "<button type=button id=btnExportAll class=secondary title=\"导出全部为 ZIP\">导出 ZIP</button>"
+         "<span class=ed-sep></span>"
+         "<label class='show-lab pick-lab'><input type=checkbox id=pickAll>全选</label>"
+         "<button type=button id=btnDeleteSel class=danger>删除</button>"
+         "<span class=ed-sep></span>"
          "<label class=show-lab><input type=checkbox id=selAll>全选展示</label>"
          "</div>"
-         "<label class=check-row><input type=checkbox id=showHeader");
-  if (getAppConfig().album_show_header) b += F(" checked");
-  b += F("><span>设备显示标题栏</span></label>"
-         "<p class=hdr-hint>墨水屏相册页顶部是否叠「相册」标题条；关掉可多露出一点画面。</p>"
+         "</div>"
+         "</div>"
          "<div id=list class=ed-saved>加载中…</div>"
          "</div></div>");
 }
@@ -475,7 +502,7 @@ function drawInkHist(idx){
   if(!cv) return;
   const dpr=Math.max(1,window.devicePixelRatio||1);
   const cssW=Math.max(1,cv.clientWidth||320);
-  const cssH=48;
+  const cssH=160;
   if(cv.width!==Math.round(cssW*dpr)||cv.height!==Math.round(cssH*dpr)){
     cv.width=Math.round(cssW*dpr);
     cv.height=Math.round(cssH*dpr);
@@ -1301,12 +1328,6 @@ async function uploadBytes(bytes,hint){
   if(!r.ok) throw new Error(t||String(r.status));
   return t;
 }
-async function albumSlotsLeft(){
-  const r=await fetch('/album/list');
-  const j=await r.json();
-  const max=j.max||30,cnt=j.count||((j.files&&j.files.length)||0);
-  return Math.max(0,max-cnt);
-}
 async function openOneFile(f){
   if(is2bpFile(f)){
     const buf=new Uint8Array(await readFileBuf(f));
@@ -1317,17 +1338,14 @@ async function openOneFile(f){
   loadImage(im,f.name,false);
 }
 async function batchImport(files){
-  let room=await albumSlotsLeft();
-  if(!room){toast('相册已满（最多 30 张）',true);return;}
-  const list=files.slice(0,room);
-  let ok=0,fail=0,lastSaved='';
+  let ok=0,fail=0,lastSaved='',stopped=false;
   // 保留侧栏色阶；批量时不用上一张的取色绑定
   rules=[];selRule=-1;setMapTo(-1);renderRules();
   $('btnUpload').disabled=true;
   $('btnSaveAs').disabled=true;
-  for(let i=0;i<list.length;i++){
-    const f=list[i];
-    const tag=(i+1)+'/'+list.length;
+  for(let i=0;i<files.length;i++){
+    const f=files[i];
+    const tag=(i+1)+'/'+files.length;
     $('fileName').classList.remove('empty');
     $('fileName').textContent='批量 '+tag+' · '+f.name;
     $('convInfo').textContent='批量导入 '+tag+'…';
@@ -1338,14 +1356,14 @@ async function batchImport(files){
         const buf=new Uint8Array(await readFileBuf(f));
         if(buf.length!==FRAME) throw new Error('尺寸不对');
         saved=await uploadBytes(buf,/\.2bp$/i.test(f.name)?f.name:'photo.2bp');
-        if(i===list.length-1) loadFrom2bp(buf,saved,true);
+        if(i===files.length-1) loadFrom2bp(buf,saved,true);
       }else{
         const im=await loadImageFromFile(f);
         img=im;editName='';
         resetView();
         pack(!!grain);
         saved=await uploadBytes(packed,'photo.2bp');
-        if(i===list.length-1){
+        if(i===files.length-1){
           editName=saved;
           const fn=$('fileName');
           fn.classList.remove('empty');
@@ -1358,7 +1376,10 @@ async function batchImport(files){
       ok++;
     }catch(e){
       fail++;
-      toast('失败 '+f.name+'：'+e,true);
+      const msg=String(e);
+      toast('失败 '+f.name+'：'+msg,true);
+      // 存储满等硬错误时停止后续，避免连续失败
+      if(/full|space|fail|失败|no space|ENOSPC/i.test(msg)){stopped=true;break;}
     }
   }
   if(lastSaved&&!editName) editName=lastSaved;
@@ -1366,7 +1387,7 @@ async function batchImport(files){
   $('btnSaveAs').disabled=!packed;
   if(packed) $('btnUpload').textContent=editName?'覆盖':'上传';
   await refreshList();
-  const more=files.length>list.length?(' · 跳过 '+(files.length-list.length)+'（已满）'):'';
+  const more=stopped?(' · 已中止，余下 '+(files.length-ok-fail)+' 未传'):'';
   const msg='批量完成：成功 '+ok+(fail?(' · 失败 '+fail):'')+more;
   $('convInfo').textContent=msg;
   toast(msg,!!fail);
@@ -1382,6 +1403,13 @@ $('pick').onchange=async function(){
     $('fileName').textContent=String(e);
     toast(String(e),true);
   }
+};
+$('pickBatch').onchange=async function(){
+  const files=[].slice.call(this.files||[]);
+  this.value='';
+  if(!files.length) return;
+  try{await batchImport(files);}
+  catch(e){toast(String(e),true);}
 };
 function decode2bp(u8){
   const idx=new Uint8Array(W*H);
@@ -1426,6 +1454,102 @@ async function downloadSaved(name){
   const fname=/\.2bp$/i.test(name)?name:(name+'.2bp');
   saveBlob(new Blob([buf],{type:'application/octet-stream'}),fname);
 }
+function crc32(buf){
+  let c=~0;
+  for(let i=0;i<buf.length;i++){
+    c^=buf[i];
+    for(let k=0;k<8;k++) c=(c>>>1)^(0xedb88320&-(c&1));
+  }
+  return ~c>>>0;
+}
+async function deflateRaw(u8){
+  if(typeof CompressionStream==='undefined') return null;
+  try{
+    const cs=new CompressionStream('deflate-raw');
+    const w=cs.writable.getWriter();
+    await w.write(u8); await w.close();
+    const r=cs.readable.getReader();
+    const parts=[];
+    for(;;){const x=await r.read(); if(x.done) break; parts.push(x.value);}
+    let n=0; for(let i=0;i<parts.length;i++) n+=parts[i].length;
+    const out=new Uint8Array(n); let o=0;
+    for(let i=0;i<parts.length;i++){out.set(parts[i],o); o+=parts[i].length;}
+    return out;
+  }catch(e){return null;}
+}
+async function makeZip(files){
+  const enc=new TextEncoder();
+  const locals=[];
+  let offset=0;
+  for(let i=0;i<files.length;i++){
+    const f=files[i];
+    const name=enc.encode(f.name);
+    const data=f.data;
+    const crc=crc32(data);
+    let cdata=await deflateRaw(data);
+    let method=8;
+    if(!cdata||cdata.length>=data.length){cdata=data; method=0;}
+    const lh=new ArrayBuffer(30);
+    const v=new DataView(lh);
+    v.setUint32(0,0x04034b50,true);
+    v.setUint16(4,20,true);
+    v.setUint16(6,0,true);
+    v.setUint16(8,method,true);
+    v.setUint16(10,0,true);
+    v.setUint16(12,0,true);
+    v.setUint32(14,crc,true);
+    v.setUint32(18,cdata.length,true);
+    v.setUint32(22,data.length,true);
+    v.setUint16(26,name.length,true);
+    v.setUint16(28,0,true);
+    locals.push({lh:new Uint8Array(lh),name:name,cdata:cdata,method:method,crc:crc,usize:data.length,csize:cdata.length,offset:offset});
+    offset+=30+name.length+cdata.length;
+  }
+  const central=[];
+  let cdirSize=0;
+  for(let i=0;i<locals.length;i++){
+    const p=locals[i];
+    const ch=new ArrayBuffer(46);
+    const v=new DataView(ch);
+    v.setUint32(0,0x02014b50,true);
+    v.setUint16(4,20,true);
+    v.setUint16(6,20,true);
+    v.setUint16(8,0,true);
+    v.setUint16(10,p.method,true);
+    v.setUint16(12,0,true);
+    v.setUint16(14,0,true);
+    v.setUint32(16,p.crc,true);
+    v.setUint32(20,p.csize,true);
+    v.setUint32(24,p.usize,true);
+    v.setUint16(28,p.name.length,true);
+    v.setUint16(30,0,true);
+    v.setUint16(32,0,true);
+    v.setUint16(34,0,true);
+    v.setUint16(36,0,true);
+    v.setUint32(38,0,true);
+    v.setUint32(42,p.offset,true);
+    central.push(new Uint8Array(ch),p.name);
+    cdirSize+=46+p.name.length;
+  }
+  const end=new ArrayBuffer(22);
+  const ev=new DataView(end);
+  ev.setUint32(0,0x06054b50,true);
+  ev.setUint16(4,0,true);
+  ev.setUint16(6,0,true);
+  ev.setUint16(8,locals.length,true);
+  ev.setUint16(10,locals.length,true);
+  ev.setUint32(12,cdirSize,true);
+  ev.setUint32(16,offset,true);
+  ev.setUint16(20,0,true);
+  const out=[];
+  for(let i=0;i<locals.length;i++){
+    const p=locals[i];
+    out.push(p.lh,p.name,p.cdata);
+  }
+  for(let i=0;i<central.length;i++) out.push(central[i]);
+  out.push(new Uint8Array(end));
+  return new Blob(out,{type:'application/zip'});
+}
 async function batchExportAll(){
   const r=await fetch('/album/list');
   const j=await r.json();
@@ -1433,18 +1557,26 @@ async function batchExportAll(){
   if(!names.length){toast('没有可导出的照片',true);return;}
   const btn=$('btnExportAll');
   if(btn) btn.disabled=true;
-  let ok=0;
   try{
+    const files=[];
     for(let i=0;i<names.length;i++){
-      toast('导出 '+(i+1)+'/'+names.length+'…');
-      await downloadSaved(names[i]);
-      ok++;
-      // 浏览器常拦截连下；稍等再下下一张
-      if(i+1<names.length) await new Promise(function(res){setTimeout(res,350);});
+      toast('打包 '+(i+1)+'/'+names.length+'…');
+      const resp=await fetch('/album/file?name='+encodeURIComponent(names[i]));
+      const buf=new Uint8Array(await resp.arrayBuffer());
+      if(buf.length!==FRAME) throw new Error(names[i]+' 尺寸不对');
+      const fname=/\.2bp$/i.test(names[i])?names[i]:(names[i]+'.2bp');
+      files.push({name:fname,data:buf});
     }
-    toast('已导出 '+ok+' 张 .2bp');
+    toast('压缩 ZIP…');
+    const zip=await makeZip(files);
+    const ts=new Date();
+    const p=function(n){return (n<10?'0':'')+n;};
+    const zipName='album_'+ts.getFullYear()+p(ts.getMonth()+1)+p(ts.getDate())
+      +'_'+p(ts.getHours())+p(ts.getMinutes())+p(ts.getSeconds())+'.zip';
+    saveBlob(zip,zipName);
+    toast('已导出 '+zipName+'（'+names.length+' 张）');
   }catch(e){
-    toast('导出中断（已 '+ok+'）：'+e,true);
+    toast('导出失败：'+e,true);
   }finally{
     if(btn) btn.disabled=false;
   }
@@ -1492,14 +1624,20 @@ async function refreshList(){
     const j=await r.json();
     const hdr=$('showHeader');
     if(hdr&&typeof j.show_header==='boolean') hdr.checked=j.show_header;
-    if(!j.files||!j.files.length){el.innerHTML='<p class=meta>(还没有照片)</p>';syncSelAll();return;}
+    if(!j.files||!j.files.length){
+      el.innerHTML='<p class=meta>(还没有照片)</p>';
+      syncSelAll();syncPickAll();
+      return;
+    }
     el.innerHTML=j.files.map(function(it){
       const n=typeof it==='string'?it:it.name;
       const show=typeof it==='string'?true:!!it.show;
       const on=n===editName?' on':'';
       const dim=show?'':' off';
-      return '<div class="thumb'+on+dim+'"><canvas width=400 height=300 data-name="'+n+'"></canvas>'
-        +'<div class="row meta-row">'
+      return '<div class="thumb'+on+dim+'" data-card="'+n+'">'
+        +'<canvas width=400 height=300 data-name="'+n+'"></canvas>'
+        +'<div class="row meta-row pick-row">'
+        +'<label class="show-lab pick-lab"><input type=checkbox data-pick="'+n+'">选</label>'
         +'<label class=show-lab><input type=checkbox data-show="'+n+'"'+(show?' checked':'')+'>展示</label>'
         +'<code>'+n+'</code></div>'
         +'<div class="row acts">'
@@ -1527,9 +1665,18 @@ async function refreshList(){
           if(card) card.remove();
           if(!el.querySelector('.thumb')) el.innerHTML='<p class=meta>(还没有照片)</p>';
           toast('已删除 '+name);
-          syncSelAll();
+          syncSelAll();syncPickAll();
         }catch(e){toast('删除失败：'+e,true);}
       };
+    });
+    el.querySelectorAll('[data-pick]').forEach(function(cb){
+      cb.onchange=function(ev){
+        ev.stopPropagation();
+        const card=cb.closest('.thumb');
+        if(card) card.classList.toggle('picked',cb.checked);
+        syncPickAll();
+      };
+      cb.onclick=function(ev){ev.stopPropagation();};
     });
     el.querySelectorAll('[data-show]').forEach(function(cb){
       cb.onchange=async function(ev){
@@ -1557,7 +1704,7 @@ async function refreshList(){
         idxToImage(decode2bp(buf),function(im){cv.getContext('2d').drawImage(im,0,0);});
       }catch(e){}
     });
-    syncSelAll();
+    syncSelAll();syncPickAll();
   }catch(e){el.textContent='列表失败：'+e;}
 }
 function syncSelAll(){
@@ -1569,6 +1716,21 @@ function syncSelAll(){
   const n=cbs.filter(function(c){return c.checked;}).length;
   el.checked=n===cbs.length;
   el.indeterminate=n>0&&n<cbs.length;
+}
+function syncPickAll(){
+  const el=$('pickAll');
+  if(!el) return;
+  const cbs=[].slice.call(document.querySelectorAll('#list [data-pick]'));
+  if(!cbs.length){el.checked=false;el.disabled=true;el.indeterminate=false;return;}
+  el.disabled=false;
+  const n=cbs.filter(function(c){return c.checked;}).length;
+  el.checked=n===cbs.length;
+  el.indeterminate=n>0&&n<cbs.length;
+}
+function pickedNames(){
+  return [].slice.call(document.querySelectorAll('#list [data-pick]:checked'))
+    .map(function(cb){return cb.dataset.pick;})
+    .filter(Boolean);
 }
 const panHold=document.createElement('input');
 panHold.type='hidden';panHold.id='panx';panHold.value='0';
@@ -1593,8 +1755,56 @@ $('showHeader').onchange=async function(){
   await fetch('/album/header?show='+show,{method:'POST'});
   toast(show?'已显示相册标题栏':'已隐藏相册标题栏');
 };
+$('albumSched').onsubmit=async function(e){
+  e.preventDefault();
+  const fd=new FormData(this);
+  const qs=new URLSearchParams(fd).toString();
+  try{
+    const r=await fetch('/album/schedule?'+qs,{method:'POST'});
+    if(!r.ok) throw new Error(await r.text());
+    const en=fd.has('refresh_en');
+    const d=+(fd.get('refresh_d')||0),h=+(fd.get('refresh_h')||0),m=+(fd.get('refresh_m')||0);
+    toast(en?('定时翻页已保存 · '+d+'天'+h+'时'+m+'分'):'定时翻页已关闭');
+  }catch(err){
+    toast('保存失败：'+err,true);
+  }
+};
 $('btnExportAll').onclick=function(){
   batchExportAll().catch(function(e){toast(String(e),true);});
+};
+async function batchDeleteSelected(){
+  const names=pickedNames();
+  if(!names.length){toast('请先勾选要删除的照片',true);return;}
+  if(!confirm('确定删除选中的 '+names.length+' 张？此操作不可恢复。')) return;
+  toast('正在删除选中…');
+  let ok=0,fail=0;
+  for(let i=0;i<names.length;i++){
+    const name=names[i];
+    try{
+      const r=await fetch('/album/delete?name='+encodeURIComponent(name),{method:'POST'});
+      if(!r.ok) throw new Error(await r.text());
+      if(editName===name) editName='';
+      ok++;
+    }catch(e){
+      fail++;
+      toast('失败 '+name+'：'+e,true);
+    }
+  }
+  await refreshList();
+  const msg='已删除 '+ok+' 张'+(fail?(' · 失败 '+fail):'');
+  toast(msg,!!fail);
+}
+$('btnDeleteSel').onclick=function(){
+  batchDeleteSelected().catch(function(e){toast(String(e),true);});
+};
+$('pickAll').onchange=function(){
+  const on=this.checked;
+  this.indeterminate=false;
+  [].slice.call(document.querySelectorAll('#list [data-pick]')).forEach(function(cb){
+    cb.checked=on;
+    const card=cb.closest('.thumb');
+    if(card) card.classList.toggle('picked',on);
+  });
 };
 $('selAll').onchange=async function(){
   const show=this.checked?1:0;
@@ -1636,7 +1846,7 @@ static void handleAlbumList() {
     o["show"] = list.shown[i];
   }
     doc["count"] = list.count;
-  doc["max"] = ALBUM_MAX;
+  doc["max"] = 0;  // 0 = 不限张数（受存储空间限制）
   doc["show_header"] = getAppConfig().album_show_header;
   String out;
   serializeJson(doc, out);
@@ -1650,6 +1860,17 @@ static void handleAlbumDelete() {
     return;
   }
   g_srv->send(200, "text/plain", "ok");
+}
+
+static void handleAlbumDeleteAll() {
+  const int n = albumDeleteAll();
+  if (n < 0) {
+    g_srv->send(400, "text/plain", "delete-all failed");
+    return;
+  }
+  char buf[32];
+  snprintf(buf, sizeof(buf), "已删除 %d 张", n);
+  g_srv->send(200, "text/plain", buf);
 }
 
 static void handleAlbumShow() {
@@ -1673,6 +1894,17 @@ static void handleAlbumShowAll() {
 
 static void handleAlbumHeader() {
   saveAlbumShowHeader(g_srv->arg("show") != "0");
+  g_srv->send(200, "text/plain", "ok");
+}
+
+static void handleAlbumSchedule() {
+  const bool en = g_srv->hasArg("refresh_en");
+  const uint32_t d = (uint32_t)g_srv->arg("refresh_d").toInt();
+  const uint32_t h = (uint32_t)g_srv->arg("refresh_h").toInt();
+  const uint32_t m = (uint32_t)g_srv->arg("refresh_m").toInt();
+  const uint32_t sec = weatherRefreshSecFromDhm(d, h, m);
+  saveAlbumRefreshSec(sec);
+  saveAlbumRefreshEn(en);
   g_srv->send(200, "text/plain", "ok");
 }
 
@@ -1724,7 +1956,7 @@ static void handleAlbumUploadDone() {
   if (g_up_ok && g_up_name[0]) {
     g_srv->send(200, "text/plain", g_up_name);
   } else {
-    g_srv->send(400, "text/plain", "upload failed (need exactly 30000 bytes, max 30)");
+    g_srv->send(400, "text/plain", "upload failed (need exactly 30000 bytes)");
   }
 }
 
@@ -1749,9 +1981,11 @@ void webAlbumRegisterRoutes(WebServer &server) {
   g_srv = &server;
   server.on("/album/list", HTTP_GET, handleAlbumList);
   server.on("/album/delete", HTTP_POST, handleAlbumDelete);
+  server.on("/album/delete-all", HTTP_POST, handleAlbumDeleteAll);
   server.on("/album/show", HTTP_POST, handleAlbumShow);
   server.on("/album/show-all", HTTP_POST, handleAlbumShowAll);
   server.on("/album/header", HTTP_POST, handleAlbumHeader);
+  server.on("/album/schedule", HTTP_POST, handleAlbumSchedule);
   server.on("/album/file", HTTP_GET, handleAlbumFileGet);
   server.on("/album/upload", HTTP_POST, handleAlbumUploadDone, handleAlbumUploadFile);
 }

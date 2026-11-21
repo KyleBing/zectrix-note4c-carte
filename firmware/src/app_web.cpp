@@ -11,12 +11,14 @@
 #include "app_power.h"
 #include "app_rtc.h"
 #include "app_errorlog.h"
+#include "app_battery.h"
 
 #include <WebServer.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
 #include <FS.h>
 #include <LittleFS.h>
+#include <esp_system.h>
 #include <cstdio>
 #include <cstring>
 
@@ -38,9 +40,9 @@ header nav{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0;flex:
 header nav a{display:inline-block;padding:5px 12px;border-radius:999px;font-size:13px;line-height:1.2;color:rgba(255,255,255,.55);text-decoration:none;border:1px solid transparent;background:transparent;transition:background .15s,color .15s,border-color .15s}
 header nav a:hover{color:#fff;background:rgba(255,255,255,.08)}
 header nav a.active{background:#ffcc00;color:#111;border-color:#ffcc00;font-weight:650}
-header .meta{margin-left:auto;display:inline-flex;align-items:center;align-self:center;gap:10px;flex-shrink:0;line-height:1;min-height:28px}
-header .meta .ver{font-size:12px;color:rgba(255,255,255,.55);font-variant-numeric:tabular-nums;letter-spacing:.02em;white-space:nowrap;line-height:1;display:inline-flex;align-items:center}
-header .gh{display:inline-flex;align-items:center;justify-content:center;color:rgba(255,255,255,.7);line-height:0}
+header .meta{margin:0 0 0 auto;padding:0;display:inline-flex;align-items:center;align-self:center;gap:10px;flex-shrink:0;line-height:1;height:28px;min-height:28px;color:inherit}
+header .meta .ver{font-size:12px;color:rgba(255,255,255,.55);font-variant-numeric:tabular-nums;letter-spacing:.02em;white-space:nowrap;line-height:1;height:28px;display:inline-flex;align-items:center}
+header .gh{display:inline-flex;align-items:center;justify-content:center;color:rgba(255,255,255,.7);line-height:0;width:28px;height:28px;flex-shrink:0}
 header .gh svg{display:block;flex-shrink:0}
 header .gh:hover{color:#fff}
 main{max-width:720px;margin:16px auto;padding:0 16px 28px}
@@ -71,6 +73,17 @@ pre{white-space:pre-wrap;background:#f7f7f5;padding:12px;border-radius:8px;font-
 .pill.warn{background:#fff1e6;color:#9a4b00}
 .status-hero{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid #eee}
 .status-hero .ver{font-size:12px;color:#999}
+.meters{display:flex;flex-direction:column;gap:14px;margin:0}
+.meter{display:flex;flex-direction:column;gap:6px;min-width:0}
+.meter-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.meter-h .lab{font-size:13px;font-weight:650;color:#1a1a1a}
+.meter-h .val{font-size:12px;color:#666;font-variant-numeric:tabular-nums;text-align:right}
+.meter-track{height:10px;border-radius:5px;background:#eceae4;overflow:hidden}
+.meter-fill{height:100%;border-radius:5px;background:#1a1a1a;width:0;max-width:100%;transition:width .2s}
+.meter-fill.ok{background:#0a7a4b}
+.meter-fill.warn{background:#c98500}
+.meter-fill.bad{background:#8b2010}
+.meter-note{margin:0;font-size:12px;color:#888}
 .wifi-card{border:1px solid #e8e8e8;border-radius:12px;padding:14px;margin:0 0 12px;background:#fafafa;transition:border-color .15s,box-shadow .15s}
 .wifi-card.active{border-color:#1a1a1a;background:#fff;box-shadow:0 0 0 1px #1a1a1a}
 .wifi-card .wifi-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
@@ -118,7 +131,7 @@ body.page-album main{max-width:none;width:100%;margin:0;padding:0;display:block}
 .ed-erase-sz em{font-style:normal;font-size:12px;color:#888;width:20px;text-align:right}
 .ed-toolbar button{padding:7px 10px;font-size:12px;border-radius:0;background:#eceae4;color:#1a1a1a;white-space:nowrap}
 .ed-toolbar button.on,.ed-map-bar>button.on{background:#1a1a1a;color:#fff;box-shadow:none}
-.ed-body{flex:0 0 auto;display:grid;grid-template-columns:1fr;min-width:0;overflow:visible;align-items:start;padding-top:20px;background:#f0eee8}
+.ed-body{flex:0 0 auto;display:grid;grid-template-columns:1fr;min-width:0;overflow:visible;align-items:start;padding-top:0;background:#f0eee8}
 @media(min-width:980px){.ed-body{grid-template-columns:max-content minmax(320px,1fr)}}
 .ed-main{display:flex;flex-direction:column;width:max-content;max-width:100%;min-width:0;align-self:start}
 .ed-pair{display:grid;grid-template-columns:400px 400px;grid-template-rows:auto auto;width:max-content;max-width:100%;min-height:0;height:max-content;overflow:hidden;background:#fff;justify-self:start;align-self:start}
@@ -144,8 +157,6 @@ body.page-album main{max-width:none;width:100%;margin:0;padding:0;display:block}
 .ed-side-ops{display:grid;grid-template-columns:1fr;gap:30px;min-width:0}
 .ed-levels{min-width:0}
 @container edside (min-width:600px){.ed-side-ops{grid-template-columns:1fr 1fr;align-items:start}}
-.ed-side-h{display:flex;align-items:center;justify-content:space-between;gap:8px}
-.ed-side-h h3{margin:0;font-size:13px;font-weight:650}
 .ed-side button{padding:4px 8px;font-size:12px;border-radius:0}
 .ed-mode button{flex:0 0 auto;border:0;border-radius:0;padding:7px 14px;font-size:13px;background:#eceae4;color:#1a1a1a}
 .ed-mode button.on{background:#1a1a1a;color:#fff}
@@ -191,11 +202,10 @@ body.page-album main{max-width:none;width:100%;margin:0;padding:0;display:block}
 #srcStage .ed-can{image-rendering:auto}
 .ed-help{margin:8px 0 0;font-size:11px;line-height:1.35}
 .hist-wrap{position:relative;user-select:none;border:1px solid #c8c8c8;background:#fff}
-#hist{width:100%;height:160px;display:block;background:#fff;cursor:ew-resize}
-.hist-read{display:flex;justify-content:space-between;font-size:11px;color:#888;margin-top:2px;font-variant-numeric:tabular-nums}
-.ink-hist-wrap{position:relative;user-select:none;border:1px solid #c8c8c8;background:#fff;margin:0 0 2px}
-#inkHist{width:100%;height:48px;display:block;background:#fff}
-.ink-hist-read{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));font-size:12px;line-height:1.3;color:#444;margin:0 0 6px;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+#hist,#inkHist{width:100%;height:160px;display:block;background:#fff}
+#hist{cursor:ew-resize}
+.hist-read{display:flex;justify-content:space-between;font-size:11px;color:#888;margin-top:2px;min-height:16px;font-variant-numeric:tabular-nums}
+.ink-hist-read{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));font-size:11px;line-height:1.3;color:#888;margin-top:2px;min-height:16px;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
 .ink-hist-read span{min-width:0;text-align:center}
 .ed-row{display:flex;align-items:center;gap:6px;margin:4px 0}
 .ed-row span{flex:0 0 36px;font-size:12px;color:#555}
@@ -244,24 +254,42 @@ body.page-album main{max-width:none;width:100%;margin:0;padding:0;display:block}
 .rules .item .lab{flex:1;min-width:0;color:#555}
 .sw{width:14px;height:14px;border:1px solid #ccc;flex-shrink:0}
 .ed-album{padding:14px 12px 24px;background:#f0eee8;flex:0 0 auto}
-.ed-album-h{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
-.ed-album-h h2{margin:0;font-size:14px}
-.ed-album-h #btnExportAll{margin-left:auto;padding:6px 10px;font-size:12px}
-.ed-album-h .show-lab{margin-left:0}
-.ed-album .check-row{border-radius:0;margin:0 0 8px;max-width:420px}
-.ed-album .hdr-hint{margin:0 0 14px;font-size:12px;color:#6b6b6b;max-width:420px}
+.ed-album-bar{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px;align-items:center}
+.ed-album-panel{flex:0 1 auto;margin:0;padding:6px 10px;background:#e8e6e0;border:1px solid #d8d5ce;min-width:0;display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px 8px}
+.ed-album-panel h3{margin:0;font-size:11px;font-weight:700;color:#666;letter-spacing:.06em;flex:0 0 auto;min-width:2.5em}
+.ed-album-panel .show-lab{margin:0;height:28px;padding:0 2px;display:inline-flex;align-items:center;font-size:12px}
+.ed-sw{display:inline-flex;align-items:center;gap:8px;margin:0;height:28px;padding:0 10px;border:2px solid #0a7a4b;background:#e8f7ef;cursor:pointer;user-select:none;font-size:12px;font-weight:650;color:#0a7a4b;box-sizing:border-box}
+.ed-sw input{width:16px;height:16px;margin:0;accent-color:#0a7a4b;flex-shrink:0;padding:0}
+.ed-sw:has(input:checked),.ed-sw.on{background:#cfeedd;border-color:#08663f;color:#08663f}
+.ed-album-acts{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-height:28px;flex:1 1 auto}
+.ed-album-acts #btnExportAll,.ed-album-acts #btnDeleteSel,.ed-album-import,.ed-album-sched button{margin:0;height:28px;padding:0 10px;font-size:12px;font-weight:650;border-radius:0;line-height:1;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box}
+.ed-album-import{position:relative;overflow:hidden;background:#1a1a1a;color:#fff;cursor:pointer;letter-spacing:.02em}
+.ed-album-import:hover{background:#333}
+.ed-album-import input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;padding:0;border:0;margin:0}
+.ed-album-acts .ed-sep{width:1px;height:16px;background:#c8c4bc;margin:0 2px;flex-shrink:0}
+.ed-album-sched{margin:0;padding:0;display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;flex:1 1 auto}
+.ed-album-sched .ed-dhm{display:inline-flex;align-items:center;gap:6px}
+.ed-album-sched .ed-dhm label{margin:0;display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#555;font-weight:600}
+.ed-album-sched input[type=number]{width:3.2em;padding:4px 6px;height:28px;box-sizing:border-box;font-size:12px;border-radius:0;border:1px solid #b0aea6;background:#fff;box-shadow:inset 0 1px 2px rgba(0,0,0,.1),0 0 0 1px rgba(0,0,0,.04);outline:none;-moz-appearance:textfield;appearance:textfield}
+.ed-album-sched input[type=number]::-webkit-outer-spin-button,.ed-album-sched input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.ed-album-sched input[type=number]:focus{border-color:#0a7a4b;box-shadow:inset 0 1px 2px rgba(0,0,0,.08),0 0 0 2px rgba(10,122,75,.22)}
 .ed-saved{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;overflow:visible;padding-bottom:4px}
-.thumb{border:1px solid #ccc;padding:6px;background:#fff;width:auto;min-width:0;box-sizing:border-box}
-.thumb.on{border-color:#111;outline:1px solid #111}
+.thumb{border:2px solid #ccc;padding:6px;background:#fff;width:auto;min-width:0;box-sizing:border-box}
+.thumb.on{border-color:#111}
+.thumb.picked{border-color:#8b2010;box-shadow:inset 0 0 0 1px #8b2010}
+.thumb.picked.on{border-color:#8b2010}
 .thumb.off{filter:grayscale(1) opacity(.45)}
+.thumb.off.picked{filter:none;opacity:1;border-color:#8b2010}
 .thumb canvas{width:100%;height:auto;aspect-ratio:4/3;image-rendering:pixelated;display:block;background:#fff;cursor:pointer}
 .thumb .row{display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap}
 .thumb .row.meta-row{justify-content:space-between}
+.thumb .row.pick-row{gap:10px}
 .thumb .row.acts{margin-top:4px;gap:6px;flex-wrap:nowrap}
 .thumb .row.acts button{margin:0;padding:4px 6px;font-size:11px;border-radius:0;flex:1 1 0;min-width:0;white-space:nowrap}
 .thumb .row code{font-size:10px}
 .show-lab{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#1a1a1a;cursor:pointer;user-select:none}
 .show-lab input{width:16px;height:16px;margin:0;accent-color:#0a7a4b;padding:0;flex-shrink:0}
+.pick-lab input{accent-color:#8b2010}
 .file-pick{display:flex;flex-direction:row;align-items:center;gap:8px;margin:0;flex-shrink:0}
 .file-cta{position:relative;display:flex;align-items:center;justify-content:center;height:36px;padding:0 16px;background:#1a1a1a;color:#fff;font-size:14px;font-weight:700;cursor:pointer;border:0;overflow:hidden;letter-spacing:.02em}
 .file-cta:hover{background:#333}
@@ -430,6 +458,132 @@ static void kvRow(String &b, const char *k, const String &v) {
   b += F("</dd>");
 }
 
+static void fmtBytes(char *buf, size_t n, uint64_t bytes) {
+  if (bytes >= (1024ull * 1024ull)) {
+    snprintf(buf, n, "%.2f MB", bytes / (1024.0 * 1024.0));
+  } else if (bytes >= 1024ull) {
+    snprintf(buf, n, "%.1f KB", bytes / 1024.0);
+  } else {
+    snprintf(buf, n, "%u B", (unsigned)bytes);
+  }
+}
+
+static const char *meterTone(int pct) {
+  if (pct >= 90) return "bad";
+  if (pct >= 75) return "warn";
+  return "ok";
+}
+
+// used/total 进度条；pct_override < 0 时按 used/total 计算
+static void appendMeter(String &b, const char *label, uint64_t used, uint64_t total,
+                        const char *extra, int pct_override = -1) {
+  int pct = 0;
+  if (pct_override >= 0) {
+    pct = pct_override;
+  } else if (total > 0) {
+    pct = (int)((used * 100ull) / total);
+    if (pct > 100) pct = 100;
+  }
+  char u[24], t[24], val[96];
+  fmtBytes(u, sizeof(u), used);
+  fmtBytes(t, sizeof(t), total);
+  if (extra && extra[0]) {
+    snprintf(val, sizeof(val), "%s / %s · %d%% · %s", u, t, pct, extra);
+  } else {
+    snprintf(val, sizeof(val), "%s / %s · %d%%", u, t, pct);
+  }
+  b += F("<div class=meter><div class=meter-h><span class=lab>");
+  b += label;
+  b += F("</span><span class=val>");
+  b += val;
+  b += F("</span></div><div class=meter-track><div class='meter-fill ");
+  b += meterTone(pct);
+  b += F("' style='width:");
+  b += String(pct);
+  b += F("%'></div></div></div>");
+}
+
+static void appendDeviceMeters(String &b) {
+  b += F("<section><h2>设备</h2><div class=meters>");
+
+  // LittleFS
+  {
+    const uint64_t total = LittleFS.totalBytes();
+    const uint64_t used = LittleFS.usedBytes();
+    char note[48];
+    AlbumList al;
+    albumList(al);
+    snprintf(note, sizeof(note), "相册 %d 张", al.count);
+    appendMeter(b, "存储 LittleFS", used, total, note);
+  }
+
+  // Internal heap（已用 = 总量 − 空闲）
+  {
+    const uint32_t total = ESP.getHeapSize();
+    const uint32_t free_h = ESP.getFreeHeap();
+    const uint32_t used = total > free_h ? total - free_h : 0;
+    char extra[40];
+    snprintf(extra, sizeof(extra), "空闲 %u KB", (unsigned)(free_h / 1024));
+    appendMeter(b, "内存 Heap", used, total, extra);
+  }
+
+  // PSRAM
+  {
+    const uint32_t total = ESP.getPsramSize();
+    if (total > 0) {
+      const uint32_t free_p = ESP.getFreePsram();
+      const uint32_t used = total > free_p ? total - free_p : 0;
+      char extra[40];
+      snprintf(extra, sizeof(extra), "空闲 %u KB", (unsigned)(free_p / 1024));
+      appendMeter(b, "内存 PSRAM", used, total, extra);
+    }
+  }
+
+  // App 分区（固件占用）
+  {
+    const uint32_t used = ESP.getSketchSize();
+    const uint32_t free_s = ESP.getFreeSketchSpace();
+    const uint32_t total = used + free_s;
+    appendMeter(b, "固件 Flash", used, total, "含 OTA 余量");
+  }
+
+  // 电池
+  {
+    const BatteryStatus bat = batteryRead();
+    if (bat.ok) {
+      const uint64_t pct = bat.percent;
+      char extra[48];
+      snprintf(extra, sizeof(extra), "%u mV · %s", (unsigned)bat.mv, batteryChargeLabel(bat.charge));
+      // 电量条：已用视觉 = 剩余百分比（满 = 满条）
+      b += F("<div class=meter><div class=meter-h><span class=lab>电池</span><span class=val>");
+      b += String((unsigned)pct);
+      b += F("% · ");
+      b += extra;
+      b += F("</span></div><div class=meter-track><div class='meter-fill ");
+      // 电量低才 warn/bad（与存储「占用高」相反）
+      if (pct <= 15) b += F("bad");
+      else if (pct <= 30) b += F("warn");
+      else b += F("ok");
+      b += F("' style='width:");
+      b += String((unsigned)pct);
+      b += F("%'></div></div></div>");
+    } else {
+      b += F("<p class=meter-note>电池：暂不可读</p>");
+    }
+  }
+
+  {
+    char chip[64];
+    snprintf(chip, sizeof(chip), "芯片 rev %d · CPU %u MHz", (int)ESP.getChipRevision(),
+             (unsigned)ESP.getCpuFreqMHz());
+    b += F("<p class=meter-note>");
+    b += chip;
+    b += F("</p>");
+  }
+
+  b += F("</div></section>");
+}
+
 static void handleRoot() {
   const AppConfig &cfg = getAppConfig();
   String b;
@@ -474,23 +628,34 @@ static void handleRoot() {
     kvRow(b, "天气", String("<span class='pill off'>关闭</span>"));
   }
   {
-    if (cfg.weather_refresh_sec == 0) {
-      kvRow(b, "天气刷新", String("关闭"));
+    if (!cfg.weather_refresh_en) {
+      kvRow(b, "天气定时", String("<span class='pill off'>关</span>"));
     } else {
       uint32_t d = 0, h = 0, m = 0;
       weatherRefreshToDhm(cfg.weather_refresh_sec, d, h, m);
-      char buf[48];
-      snprintf(buf, sizeof(buf), "%u 天 %u 时 %u 分", (unsigned)d, (unsigned)h, (unsigned)m);
-      kvRow(b, "天气刷新", String(buf));
+      char buf[80];
+      snprintf(buf, sizeof(buf), "<span class='pill on'>开 · %u天%u时%u分</span>", (unsigned)d,
+               (unsigned)h, (unsigned)m);
+      kvRow(b, "天气定时", String(buf));
     }
   }
   {
     AlbumList al;
     albumList(al);
     char buf[32];
-    snprintf(buf, sizeof(buf), "%d / %d", al.count, ALBUM_MAX);
+    snprintf(buf, sizeof(buf), "%d 张", al.count);
     kvRow(b, "相册", String(buf));
     kvRow(b, "相册标题栏", String(cfg.album_show_header ? "显示" : "隐藏"));
+    if (!cfg.album_refresh_en) {
+      kvRow(b, "相册定时", String("<span class='pill off'>关</span>"));
+    } else {
+      uint32_t d = 0, h = 0, m = 0;
+      weatherRefreshToDhm(cfg.album_refresh_sec, d, h, m);
+      char buf2[80];
+      snprintf(buf2, sizeof(buf2), "<span class='pill on'>开 · %u天%u时%u分</span>", (unsigned)d,
+               (unsigned)h, (unsigned)m);
+      kvRow(b, "相册定时", String(buf2));
+    }
   }
   {
     char idle[40];
@@ -549,6 +714,7 @@ static void handleRoot() {
     kvRow(b, "应用", apps);
   }
   b += F("</dl></section>");
+  appendDeviceMeters(b);
   sendHtml(NavTab::Status, b);
 }
 
@@ -1019,11 +1185,16 @@ static void appendWeatherForm(String &b, const AppConfig &cfg, const WeatherGeoR
   {
     uint32_t d = 0, h = 0, m = 0;
     weatherRefreshToDhm(cfg.weather_refresh_sec, d, h, m);
-    b += F("<section><h2>自动刷新</h2>"
-           "<p class=hint>仅当设备<strong>停留在天气 App</strong>且未开配置页时，到期才自动拉数并刷屏；停留在其它 App 时不抢切。"
-           "填 <strong>0 天 0 时 0 分</strong> 关闭；开启时合计至少 <strong>1 分钟</strong>。"
-           "请把「无操作自动关机」设为关闭或长于本间隔，否则会先睡过去。</p>"
+    b += F("<section><h2>定时刷新</h2>"
+           "<p class=hint>开关打开后：停留在天气 App 时按间隔自动拉数；关机时若前台是天气则 "
+           "<strong>RTC 定时深睡</strong>到点唤醒刷新再睡。开关关闭则不自动刷、关机走松电。"
+           "间隔至少 <strong>1 分钟</strong>。</p>"
            "<form method=POST action=/weather>"
+           "<label class='check-row");
+    if (cfg.weather_refresh_en) b += F(" on");
+    b += F("'><input type=checkbox name=refresh_en value=1");
+    if (cfg.weather_refresh_en) b += F(" checked");
+    b += F("><span>启用天气定时刷新</span></label>"
            "<div class=btn-row style=align-items:flex-end;gap:10px>"
            "<label style=margin:0>天<br><input name=refresh_d type=number min=0 max=365 step=1 value=");
     b += String(d);
@@ -1034,8 +1205,9 @@ static void appendWeatherForm(String &b, const AppConfig &cfg, const WeatherGeoR
            "<label style=margin:0>分<br><input name=refresh_m type=number min=0 max=59 step=1 value=");
     b += String(m);
     b += F(" style=width:5.5em></label>"
-           "<button type=submit name=action value=refresh>保存间隔</button>"
-           "</div></form></section>");
+           "</div>"
+           "<div class=btn-row><button type=submit name=action value=refresh>保存定时设置</button></div>"
+           "</form></section>");
   }
 
   b += F("<section><h2>搜索位置</h2>");
@@ -1110,24 +1282,24 @@ static void handleWeatherPost() {
                        cfg.qweather_location_name);
     flash = F("<div class='flash ok'>天气开关已保存</div>");
   } else if (action == "refresh") {
+    const bool en = g_server.hasArg("refresh_en");
     const uint32_t d = (uint32_t)g_server.arg("refresh_d").toInt();
     const uint32_t h = (uint32_t)g_server.arg("refresh_h").toInt();
     const uint32_t m = (uint32_t)g_server.arg("refresh_m").toInt();
     const uint32_t sec = weatherRefreshSecFromDhm(d, h, m);
     saveWeatherRefreshSec(sec);
-    if (sec == 0) {
-      flash = F("<div class='flash ok'>已关闭天气自动刷新</div>");
-    } else {
-      uint32_t od = 0, oh = 0, om = 0;
-      weatherRefreshToDhm(sec, od, oh, om);
-      flash = F("<div class='flash ok'>自动刷新：");
-      flash += String(od);
-      flash += F(" 天 ");
-      flash += String(oh);
-      flash += F(" 时 ");
-      flash += String(om);
-      flash += F(" 分</div>");
-    }
+    saveWeatherRefreshEn(en);
+    uint32_t od = 0, oh = 0, om = 0;
+    weatherRefreshToDhm(getAppConfig().weather_refresh_sec, od, oh, om);
+    flash = F("<div class='flash ok'>天气定时：");
+    flash += en ? F("开") : F("关");
+    flash += F(" · ");
+    flash += String(od);
+    flash += F(" 天 ");
+    flash += String(oh);
+    flash += F(" 时 ");
+    flash += String(om);
+    flash += F(" 分</div>");
   } else if (action == "search") {
     const String q = g_server.arg("geo_query");
     if (!weatherGeoLookup(q.c_str(), geo)) {

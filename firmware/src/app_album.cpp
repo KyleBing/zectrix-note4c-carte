@@ -10,80 +10,106 @@
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <ctime>
+#include <time.h>
 
 bool albumEnsureDir() {
   if (LittleFS.exists(ALBUM_DIR)) return true;
   return LittleFS.mkdir(ALBUM_DIR);
 }
 
-static int cmpName(const void *a, const void *b) {
-  return strcmp(static_cast<const char *>(a), static_cast<const char *>(b));
+void AlbumList::clear() {
+  free(names);
+  free(shown);
+  names = nullptr;
+  shown = nullptr;
+  count = 0;
+  capacity = 0;
 }
 
-// Load hidden-name set from vis.json: {"hidden":["001.2bp",...]}
-static void loadHidden(char hidden[][24], int &n_hidden) {
-  n_hidden = 0;
+bool AlbumList::reserve(int need) {
+  if (need <= capacity) return true;
+  int ncap = capacity ? capacity : 16;
+  while (ncap < need) {
+    if (ncap > 10000) return false;
+    ncap *= 2;
+  }
+  auto *nn = static_cast<char(*)[24]>(realloc(names, (size_t)ncap * 24));
+  if (!nn) return false;
+  names = nn;
+  bool *ns = static_cast<bool *>(realloc(shown, (size_t)ncap * sizeof(bool)));
+  if (!ns) return false;
+  shown = ns;
+  capacity = ncap;
+  return true;
+}
+
+bool AlbumList::push(const char *name, bool is_shown) {
+  if (!name || !name[0]) return false;
+  if (!reserve(count + 1)) return false;
+  strncpy(names[count], name, 23);
+  names[count][23] = '\0';
+  shown[count] = is_shown;
+  count++;
+  return true;
+}
+
+static bool loadVisDoc(JsonDocument &doc) {
   File f = LittleFS.open(ALBUM_VIS_PATH, "r");
-  if (!f) return;
-  JsonDocument doc;
+  if (!f) return false;
   const DeserializationError err = deserializeJson(doc, f);
   f.close();
-  if (err) return;
-  if (!doc["hidden"].is<JsonArray>()) return;
-  for (JsonVariant v : doc["hidden"].as<JsonArray>()) {
-    const char *name = v.as<const char *>();
-    if (!name || !name[0] || n_hidden >= ALBUM_MAX) continue;
-    strncpy(hidden[n_hidden], name, 23);
-    hidden[n_hidden][23] = '\0';
-    n_hidden++;
-  }
+  return !err;
 }
 
-static bool nameInHidden(const char hidden[][24], int n_hidden, const char *name) {
-  for (int i = 0; i < n_hidden; i++) {
-    if (strcmp(hidden[i], name) == 0) return true;
+static bool nameInHiddenArr(JsonArray arr, const char *name) {
+  if (!arr) return false;
+  for (JsonVariant v : arr) {
+    const char *h = v.as<const char *>();
+    if (h && strcmp(h, name) == 0) return true;
   }
   return false;
 }
 
 bool albumIsShown(const char *name) {
   if (!albumNameOk(name)) return false;
-  char hidden[ALBUM_MAX][24];
-  int n = 0;
-  loadHidden(hidden, n);
-  return !nameInHidden(hidden, n, name);
+  JsonDocument doc;
+  if (!loadVisDoc(doc)) return true;
+  if (!doc["hidden"].is<JsonArray>()) return true;
+  return !nameInHiddenArr(doc["hidden"].as<JsonArray>(), name);
 }
 
 bool albumSetShown(const char *name, bool show) {
   if (!albumNameOk(name)) return false;
-  char hidden[ALBUM_MAX][24];
-  int n = 0;
-  loadHidden(hidden, n);
-  const bool was = nameInHidden(hidden, n, name);
+  JsonDocument doc;
+  loadVisDoc(doc);
+  JsonArray arr = doc["hidden"].is<JsonArray>() ? doc["hidden"].as<JsonArray>() : doc["hidden"].to<JsonArray>();
+
+  const bool was = nameInHiddenArr(arr, name);
   if (show) {
     if (!was) return true;
-    int w = 0;
-    for (int i = 0; i < n; i++) {
-      if (strcmp(hidden[i], name) == 0) continue;
-      if (w != i) memcpy(hidden[w], hidden[i], 24);
-      w++;
+    JsonDocument next;
+    JsonArray out = next["hidden"].to<JsonArray>();
+    for (JsonVariant v : arr) {
+      const char *h = v.as<const char *>();
+      if (!h || strcmp(h, name) == 0) continue;
+      out.add(h);
     }
-    n = w;
-  } else {
-    if (was) return true;
-    if (n >= ALBUM_MAX) return false;
-    strncpy(hidden[n], name, 23);
-    hidden[n][23] = '\0';
-    n++;
+    albumEnsureDir();
+    File f = LittleFS.open(ALBUM_VIS_PATH, "w");
+    if (!f) return false;
+    const bool ok = serializeJson(next, f) > 0;
+    f.close();
+    return ok;
   }
 
+  if (was) return true;
+  arr.add(name);
   albumEnsureDir();
   File f = LittleFS.open(ALBUM_VIS_PATH, "w");
   if (!f) return false;
-  JsonDocument doc;
-  JsonArray arr = doc["hidden"].to<JsonArray>();
-  for (int i = 0; i < n; i++) arr.add(hidden[i]);
   const bool ok = serializeJson(doc, f) > 0;
   f.close();
   return ok;
@@ -106,12 +132,16 @@ bool albumSetShownAll(bool show) {
 }
 
 bool albumList(AlbumList &out) {
-  out = AlbumList{};
+  out.clear();
   if (!albumEnsureDir()) return false;
 
-  char hidden[ALBUM_MAX][24];
-  int n_hidden = 0;
-  loadHidden(hidden, n_hidden);
+  JsonDocument vis;
+  loadVisDoc(vis);
+  JsonArray hidden;
+  if (vis["hidden"].is<JsonArray>()) hidden = vis["hidden"].as<JsonArray>();
+
+  time_t *mtimes = nullptr;
+  int mcap = 0;
 
   File dir = LittleFS.open(ALBUM_DIR);
   if (!dir || !dir.isDirectory()) return false;
@@ -124,7 +154,7 @@ bool albumList(AlbumList &out) {
     const char *base = strrchr(name, '/');
     base = base ? base + 1 : name;
     const size_t nlen = strlen(base);
-    if (nlen < 5 || nlen >= sizeof(out.names[0])) {
+    if (nlen < 5 || nlen >= 24) {
       f.close();
       continue;
     }
@@ -137,50 +167,66 @@ bool albumList(AlbumList &out) {
       f.close();
       continue;
     }
-    if (out.count >= ALBUM_MAX) {
+    if (!out.reserve(out.count + 1)) {
       f.close();
       break;
     }
-    strncpy(out.names[out.count], base, sizeof(out.names[0]) - 1);
-    out.names[out.count][sizeof(out.names[0]) - 1] = '\0';
-    out.shown[out.count] = !nameInHidden(hidden, n_hidden, base);
+    if (out.count >= mcap) {
+      int nc = mcap ? mcap * 2 : 16;
+      auto *nm = static_cast<time_t *>(realloc(mtimes, (size_t)nc * sizeof(time_t)));
+      if (!nm) {
+        f.close();
+        break;
+      }
+      mtimes = nm;
+      mcap = nc;
+    }
+    strncpy(out.names[out.count], base, 23);
+    out.names[out.count][23] = '\0';
+    out.shown[out.count] = !nameInHiddenArr(hidden, base);
+    mtimes[out.count] = f.getLastWrite();
     out.count++;
     f.close();
   }
   dir.close();
-  if (out.count > 1) {
-    // 新图优先：按文件名降序（更高编号在前）；keep shown[] aligned
+
+  if (out.count > 1 && mtimes) {
+    // 最新修改在前；mtime 相同再按文件名降序
     for (int i = 0; i < out.count - 1; i++) {
       for (int j = i + 1; j < out.count; j++) {
-        if (strcmp(out.names[i], out.names[j]) < 0) {
-          char tmp[24];
-          memcpy(tmp, out.names[i], 24);
-          memcpy(out.names[i], out.names[j], 24);
-          memcpy(out.names[j], tmp, 24);
-          const bool sb = out.shown[i];
-          out.shown[i] = out.shown[j];
-          out.shown[j] = sb;
-        }
+        const bool newer = mtimes[j] > mtimes[i] ||
+                           (mtimes[j] == mtimes[i] && strcmp(out.names[i], out.names[j]) < 0);
+        if (!newer) continue;
+        char tmp[24];
+        memcpy(tmp, out.names[i], 24);
+        memcpy(out.names[i], out.names[j], 24);
+        memcpy(out.names[j], tmp, 24);
+        const bool sb = out.shown[i];
+        out.shown[i] = out.shown[j];
+        out.shown[j] = sb;
+        const time_t mt = mtimes[i];
+        mtimes[i] = mtimes[j];
+        mtimes[j] = mt;
       }
     }
   }
-  (void)cmpName;
+  free(mtimes);
   return true;
 }
 
 bool albumListVisible(AlbumList &out) {
   AlbumList all;
   if (!albumList(all)) {
-    out = AlbumList{};
+    out.clear();
     return false;
   }
-  out = AlbumList{};
+  out.clear();
   for (int i = 0; i < all.count; i++) {
     if (!all.shown[i]) continue;
-    strncpy(out.names[out.count], all.names[i], sizeof(out.names[0]) - 1);
-    out.names[out.count][sizeof(out.names[0]) - 1] = '\0';
-    out.shown[out.count] = true;
-    out.count++;
+    if (!out.push(all.names[i], true)) {
+      out.clear();
+      return false;
+    }
   }
   return true;
 }
@@ -195,37 +241,16 @@ bool albumNextFileName(char *out_name, size_t out_len) {
   if (!out_name || out_len < 8) return false;
   AlbumList list;
   albumList(list);
-  if (list.count >= ALBUM_MAX) return false;
 
-  // Prefer max+1 so the new file sorts to the front (desc by name).
   int max_n = 0;
   for (int i = 0; i < list.count; i++) {
     int n = 0;
     if (sscanf(list.names[i], "%d", &n) == 1 && n > max_n) max_n = n;
   }
-  if (max_n < ALBUM_MAX) {
-    snprintf(out_name, out_len, "%03d.2bp", max_n + 1);
-    return true;
-  }
-
-  // Fallback: fill gaps (e.g. max already ALBUM_MAX but some deleted).
-  for (int n = 1; n <= ALBUM_MAX; n++) {
-    char cand[16];
-    snprintf(cand, sizeof(cand), "%03d.2bp", n);
-    bool used = false;
-    for (int i = 0; i < list.count; i++) {
-      if (strcmp(list.names[i], cand) == 0) {
-        used = true;
-        break;
-      }
-    }
-    if (!used) {
-      strncpy(out_name, cand, out_len - 1);
-      out_name[out_len - 1] = '\0';
-      return true;
-    }
-  }
-  return false;
+  // 无数量上限；下一编号。空间不足时在写入阶段失败。
+  if (max_n < 0 || max_n >= 999999) return false;
+  snprintf(out_name, out_len, "%03d.2bp", max_n + 1);
+  return true;
 }
 
 bool albumNameOk(const char *name) {
@@ -250,6 +275,23 @@ bool albumDelete(const char *name) {
   if (!LittleFS.exists(path)) return false;
   const bool ok = LittleFS.remove(path);
   if (ok) albumSetShown(name, true);  // drop from hidden list
+  return ok;
+}
+
+int albumDeleteAll() {
+  AlbumList list;
+  if (!albumList(list)) return -1;
+  int ok = 0;
+  for (int i = 0; i < list.count; i++) {
+    if (albumDelete(list.names[i])) ok++;
+  }
+  // 清空隐藏表（文件已无）
+  albumEnsureDir();
+  File f = LittleFS.open(ALBUM_VIS_PATH, "w");
+  if (f) {
+    f.print("{\"hidden\":[]}");
+    f.close();
+  }
   return ok;
 }
 
@@ -307,5 +349,10 @@ bool albumShow(EpdSsd2683 &epd, int index) {
 
   Serial.printf("[Album] show %s (%d/%d) header=%d\n", list.names[index], index + 1, list.count,
                 (int)getAppConfig().album_show_header);
-  return epd.display();
+  const bool ok = epd.display();
+  if (ok) {
+    const time_t now = time(nullptr);
+    if (now >= 1700000000) saveAlbumLastUnix((uint32_t)now);
+  }
+  return ok;
 }

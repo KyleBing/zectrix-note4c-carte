@@ -152,21 +152,20 @@ bool calendarShow(EpdSsd2683 &epd) {
 
   const bool monday_first = getAppConfig().week_start_monday;
 
-  // 无头部：顶边留小间距，格子吃满屏高
-  constexpr int grid_top = 4;
+  // 顶栏黑底星期行（+4px），文字垂直居中；日期格吃满剩余高度
+  constexpr int head_h = 30;  // 原 26 + 4
   constexpr int grid_left = Theme::MarginX;
   constexpr int grid_w = 400 - Theme::MarginX * 2;
   constexpr int cols = 7;
   constexpr int cell_w = grid_w / cols;
-  constexpr int wd_h = 18;
-  constexpr int gap_above_line = 3;
   constexpr int gap_below_line = 3;
   constexpr int rows = 6;
   constexpr int kLunGap = 3;
   constexpr int kLunCw = 8;  // 小字 CJK 宽
 
-  const int line_y = grid_top + wd_h + gap_above_line;
-  const int days_top = line_y + 1 + gap_below_line;
+  const int wd_text_h = fontLineHeight();
+  const int wd_y = (head_h - wd_text_h) / 2;
+  const int days_top = head_h + gap_below_line;
 
   // 2× 公历数字 + 右侧竖排小字农历
   const int day_h = fontLineHeightDouble();
@@ -178,13 +177,13 @@ bool calendarShow(EpdSsd2683 &epd) {
   static const char *kWdMon[] = {"一", "二", "三", "四", "五", "六", "日"};
   const char **kWd = monday_first ? kWdMon : kWdSun;
 
+  epd.fillRect(0, 0, EpdSsd2683::kWidth, head_h, Theme::HeaderBg);
   for (int c = 0; c < cols; c++) {
     const int cx = grid_left + c * cell_w + cell_w / 2;
     const bool weekend = monday_first ? (c >= 5) : (c == 0 || c == 6);
-    fontDrawTextWrapped(epd, cx - 8, grid_top, 16, grid_top + wd_h, kWd[c],
-                        weekend ? Theme::Alert : Theme::Fg);
+    fontDrawTextWrapped(epd, cx - 8, wd_y, 16, wd_y + wd_text_h, kWd[c],
+                        weekend ? Theme::Accent : Theme::HeaderFg, Theme::HeaderBg);
   }
-  epd.drawHLine(grid_left, line_y, grid_w, Theme::Fg);
 
   const int dim = daysInMonth(now.year, now.month);
   const int first_col = colFromWeekday(weekdayFromYmd(now.year, now.month, 1), monday_first);

@@ -15,6 +15,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <esp_system.h>
+#include <esp_sleep.h>
 
 #include "board.h"
 #include "epd_ssd2683.h"
@@ -73,6 +74,7 @@ static void i2cBusRecover() {
 
 static void persistUi() {
   saveUiSession(static_cast<uint8_t>(g_app), static_cast<uint8_t>(g_weather_mode), g_album_index);
+  powerNotifyForegroundApp(g_app);
 }
 
 static void suppressKeys(uint32_t ms) {
@@ -312,6 +314,11 @@ void setup() {
                 i2cAck(I2C_ADDR_NFC) ? "OK" : "--", i2cAck(I2C_ADDR_ES8311) ? "OK" : "--");
   rtcBegin();  // 从 PCF8563 灌入系统时间；复位后下次联网会再 NTP 一次
 
+  const bool timer_wake = powerWokeFromRtcAlarm();
+  Serial.printf("[BOOT] wakeup_cause=%d timer_wake=%d af=%d int=%d\n",
+                (int)esp_sleep_get_wakeup_cause(), (int)timer_wake, (int)rtcAlarmFired(),
+                (int)(digitalRead(PIN_RTC_INT) == LOW));
+
   uint8_t saved_app = 0, saved_wx = 0;
   int saved_alb = 0;
   if (loadUiSession(saved_app, saved_wx, saved_alb) && saved_app < static_cast<uint8_t>(AppId::Count)) {
@@ -330,6 +337,35 @@ void setup() {
     g_app = appIdFirstEnabled();
     Serial.printf("[UI] disabled restore -> %s\n", appIdName(g_app));
   }
+  powerNotifyForegroundApp(g_app);
+
+  // 定时醒：到期才刷；早醒（INT 未抬/同一分钟）只再睡，不翻页
+  if (timer_wake) {
+    rtcAlarmClear();
+    bool due = true;
+    if (g_app == AppId::Album) due = albumAutoRefreshDue();
+    else if (g_app == AppId::Weather) due = weatherAutoRefreshDue();
+    Serial.printf("[PWR] timer job app=%s due=%d\n", appIdName(g_app), (int)due);
+    if (due) {
+      {
+        const time_t now = time(nullptr);
+        if (now >= 1700000000) {
+          if (g_app == AppId::Album) saveAlbumLastUnix((uint32_t)now);
+          else if (g_app == AppId::Weather) saveWeatherLastUnix((uint32_t)now);
+        }
+      }
+      const bool ok = showCurrentApp(g_app == AppId::Album);
+      Serial.printf("[PWR] timer refresh ok=%d -> sleep\n", (int)ok);
+      persistUi();
+    } else {
+      Serial.println("[PWR] timer early wake -> sleep without refresh");
+    }
+    powerOffNow();  // 不返回
+  }
+
+  // 交互开机：清定时深睡标记 + 遗留闹钟
+  saveScheduledSleep(false);
+  rtcAlarmClear();
 
   // 新固件刷入后首屏展示 LOGO/版本（每个 APP_BUILD 一次）；平时上电仍不刷屏
   if (splashShowIfNeeded(epd)) {
@@ -397,6 +433,18 @@ void loop() {
       Serial.printf("[UI] weather auto-refresh (every %u s)\n",
                     (unsigned)getAppConfig().weather_refresh_sec);
       const bool ok = showCurrentApp(false);
+      finishAction(ok);
+      return;
+    }
+    if (g_app == AppId::Album && albumAutoRefreshDue()) {
+      busy = true;
+      Serial.printf("[UI] album auto-advance (every %u s)\n",
+                    (unsigned)getAppConfig().album_refresh_sec);
+      {
+        const time_t now = time(nullptr);
+        if (now >= 1700000000) saveAlbumLastUnix((uint32_t)now);  // 先占槽，防连刷
+      }
+      const bool ok = showCurrentApp(true);  // 翻下一张
       finishAction(ok);
       return;
     }
