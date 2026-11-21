@@ -16,7 +16,7 @@ static bool g_wdt_had_idle0 = false;
 static bool g_wdt_had_idle1 = false;
 
 static bool idleWatched(int core) {
-  TaskHandle_t idle = xTaskGetIdleTaskHandleForCPU(core);
+  TaskHandle_t idle = xTaskGetIdleTaskHandleForCore(core);
   return idle && esp_task_wdt_status(idle) == ESP_OK;
 }
 
@@ -102,7 +102,21 @@ void powerClearDownClicks() { g_down_clicks = 0; }
 
 void powerBegin() {
   // 默认 5s；HTTPS / 四色全刷经常更长。只拉长超时，不额外订阅 loop 任务。
-  esp_task_wdt_init(30, true);
+  // Arduino-ESP32 3.x / IDF 5：旧的 (timeout_s, panic) 签名已移除。
+  esp_task_wdt_config_t twdt = {
+      .timeout_ms = 30000,
+      .idle_core_mask = 0,
+      .trigger_panic = true,
+  };
+#if CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0
+  twdt.idle_core_mask |= (1 << 0);
+#endif
+#if CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1
+  twdt.idle_core_mask |= (1 << 1);
+#endif
+  if (esp_task_wdt_reconfigure(&twdt) == ESP_ERR_INVALID_STATE) {
+    esp_task_wdt_init(&twdt);
+  }
   pinMode(PIN_PWR_HOLD, OUTPUT);
   digitalWrite(PIN_PWR_HOLD, HIGH);
   pinMode(PIN_BTN_DOWN, INPUT_PULLUP);
