@@ -52,18 +52,42 @@ void EpdSsd2683::powerOff() {
   digitalWrite(pin_pwr_, LOW);
 }
 
-void EpdSsd2683::waitBusy(uint32_t timeout_ms) {
+void EpdSsd2683::stopPanel() {
+  // Best-effort stop mid-waveform; do not wait on BUSY.
+  sendCommand(0x02);
+  sendData(0x00);
+  delay(5);
+  sendCommand(0x07);
+  sendData(0xA5);
+  delay(5);
+  powerOff();
+}
+
+bool EpdSsd2683::waitBusy(uint32_t timeout_ms) {
   const uint32_t start = millis();
   while (digitalRead(pin_busy_) == LOW) {
     if (millis() - start > timeout_ms) {
       Serial.println("[EPD] busy timeout");
       break;
     }
-    powerPoll(false);  // power-off only; do not latch DOWN shorts during refresh
+    if (allow_interrupt_) {
+      if (!powerNavArmed()) {
+        powerPoll(false);  // ignore trigger-key release
+      } else {
+        powerPoll(true);
+        if (powerNavShouldAbort()) {
+          aborted_ = true;
+          return false;
+        }
+      }
+    } else {
+      powerPoll(false);  // power-off only; do not latch shorts
+    }
     ledUpdate();
     wdtPet();
     delay(20);
   }
+  return true;
 }
 
 void EpdSsd2683::sendCommand(uint8_t cmd) {
@@ -100,7 +124,7 @@ void EpdSsd2683::hwReset() {
   delay(20);
   digitalWrite(pin_rst_, HIGH);
   delay(10);
-  waitBusy();
+  (void)waitBusy();
 }
 
 void EpdSsd2683::initPanel() {
@@ -109,24 +133,25 @@ void EpdSsd2683::initPanel() {
   sendData(0x01);
 }
 
-void EpdSsd2683::turnOnDisplay() {
+bool EpdSsd2683::turnOnDisplay() {
   sendCommand(0x04);  // power on
-  waitBusy();
+  if (!waitBusy()) return false;
   delay(10);
 
   sendCommand(0x12);  // display refresh
   sendData(0x00);
   delay(10);
-  waitBusy();
+  if (!waitBusy()) return false;
 
   sendCommand(0x02);  // power off
   sendData(0x00);
-  waitBusy();
+  if (!waitBusy()) return false;
   delay(20);
 
   sendCommand(0x07);  // deep sleep
   sendData(0xA5);
   powerOff();
+  return true;
 }
 
 void EpdSsd2683::clear(EpdColor color) {
@@ -257,27 +282,66 @@ void EpdSsd2683::drawText(int x, int y, const char *text, EpdColor fg, EpdColor 
   }
 }
 
-bool EpdSsd2683::display() {
+bool EpdSsd2683::display(bool allow_interrupt) {
   if (!ok_ || !fb_) return false;
+  aborted_ = false;
+  if (suppress_interrupt_once_) {
+    allow_interrupt = false;
+    suppress_interrupt_once_ = false;
+  }
+  allow_interrupt_ = allow_interrupt;
   powerIdleTouch();
-  Serial.println("[EPD] full refresh start (may take 10s+)");
+  if (allow_interrupt_) {
+    powerNavDisarmUntilRelease();
+    Serial.println("[EPD] full refresh start (interruptible, may take 10s+)");
+  } else {
+    Serial.println("[EPD] full refresh start (may take 10s+)");
+  }
   const uint32_t t0 = millis();
   WdtLongOpGuard wdt;  // 四色全刷常 > loop TWDT（约 5s）
 
   powerOn();
   hwReset();
+  if (aborted_) {
+    stopPanel();
+    Serial.printf("[EPD] full refresh aborted in %lu ms\n", (unsigned long)(millis() - t0));
+    return false;
+  }
   initPanel();
 
   sendCommand(0x10);  // DTM1 write
-  waitBusy();
+  if (!waitBusy()) {
+    stopPanel();
+    Serial.printf("[EPD] full refresh aborted in %lu ms\n", (unsigned long)(millis() - t0));
+    return false;
+  }
   for (int y = 0; y < kHeight; y++) {
     writeBytes(fb_ + y * kBytesPerRow, kBytesPerRow);
     if ((y & 15) == 15) {
-      wdtPet();
+      if (allow_interrupt_) {
+        if (!powerNavArmed()) {
+          powerPoll(false);
+        } else {
+          powerPoll(true);
+          if (powerNavShouldAbort()) {
+            aborted_ = true;
+            stopPanel();
+            Serial.printf("[EPD] full refresh aborted in %lu ms\n",
+                          (unsigned long)(millis() - t0));
+            return false;
+          }
+        }
+      } else {
+        wdtPet();
+      }
       delay(1);
     }
   }
-  turnOnDisplay();
+  if (!turnOnDisplay()) {
+    stopPanel();
+    Serial.printf("[EPD] full refresh aborted in %lu ms\n", (unsigned long)(millis() - t0));
+    return false;
+  }
 
   Serial.printf("[EPD] full refresh done in %lu ms\n", (unsigned long)(millis() - t0));
   return true;

@@ -10,6 +10,8 @@
  *   BOOT release     → in-app ONLY (never switches App)
  *
  * LED: 按键按下即亮、松开即灭；长按阈值到达时闪两下（可松手）；刷屏过程不亮，完成后一闪；慢闪连 WiFi；失败三短闪
+ *
+ * EPD: 四色全刷可被导航键中断；停手后目标页会完整刷完并停留。
  */
 
 #include <Arduino.h>
@@ -79,7 +81,7 @@ static void persistUi() {
 
 static void suppressKeys(uint32_t ms) {
   g_ignore_keys_until = millis() + ms;
-  powerClearDownClicks();
+  powerClearNavClicks();
 }
 
 static void skipApps(int steps) {
@@ -153,7 +155,7 @@ static void drawConfigWebPage(bool ok) {
     fontDrawTextWrapped(epd, 8, 64, 384, 260, "热点密码至少 8 位", Theme::Fg);
     fontDrawTextWrapped(epd, 8, 88, 384, 260, "再试：长按上键约 1.5 秒", Theme::Fg);
     fontDrawTextWrapped(epd, 8, 112, 384, 260, "详情见 USB 串口日志", Theme::Fg);
-    epd.display();
+    epd.display(false);
     return;
   }
 
@@ -233,7 +235,7 @@ static void drawConfigWebPage(bool ok) {
     snprintf(line, sizeof(line), "无操作 %u 秒后关机（接电不关；配置页不计）", (unsigned)idle);
     fontDrawTextWrapped(epd, 8, y, 384, kMaxY, line, Theme::Fg);
   }
-  epd.display();
+  epd.display(false);
 }
 
 static bool showCurrentApp(bool refresh) {
@@ -263,6 +265,113 @@ static bool showCurrentApp(bool refresh) {
     default:
       return false;
   }
+}
+
+enum class NavDrainResult : uint8_t { None, Applied, OpenWeb };
+enum class InteractiveShowResult : uint8_t { Ok, Fail, WantWeb };
+
+static void applyBootSkip(uint8_t n) {
+  if (!n) return;
+  if (!appIdEnabled(g_app)) g_app = appIdFirstEnabled();
+  if (g_app == AppId::Weather) {
+    for (uint8_t i = 0; i < n; i++) g_weather_mode = weatherModeNext(g_weather_mode);
+    Serial.printf("[UI] weather skip %u -> %s\n", (unsigned)n, weatherModeName(g_weather_mode));
+  } else if (g_app == AppId::Album) {
+    const int count = albumCountCached();
+    if (count > 0) g_album_index = (g_album_index + (int)n) % count;
+    Serial.printf("[UI] album skip %u -> %d/%d\n", (unsigned)n, g_album_index, count);
+  }
+}
+
+// After EPD abort: wait for key release + combo quiet, then apply nav (or open web).
+static NavDrainResult drainNavAfterEpdAbort() {
+  const uint32_t t0 = millis();
+  uint32_t released_since = 0;
+  for (;;) {
+    powerPoll(true);
+    ledUpdate();
+    wdtPet();
+
+    if (powerTakeUpLong()) return NavDrainResult::OpenWeb;
+
+    if (powerNavAnyHeld()) {
+      released_since = 0;
+    } else if (released_since == 0) {
+      released_since = millis();
+    } else if (millis() - released_since >= POWER_KEY_COMBO_MS) {
+      break;
+    }
+
+    if (millis() - t0 > 4000) break;
+    delay(10);
+  }
+
+  const uint8_t dn = powerTakeDownClicksNow();
+  const uint8_t up = powerTakeUpClicksNow();
+  const uint8_t boot = powerTakeBootClicksNow();
+  if (dn) {
+    skipApps((int)dn);
+    Serial.printf("[UI] DOWN x%u (abort) -> %s\n", (unsigned)dn, appIdName(g_app));
+    return NavDrainResult::Applied;
+  }
+  if (up) {
+    skipApps(-(int)up);
+    Serial.printf("[UI] UP x%u (abort) -> %s\n", (unsigned)up, appIdName(g_app));
+    return NavDrainResult::Applied;
+  }
+  if (boot) {
+    Serial.printf("[UI] BOOT x%u (abort) app=%s\n", (unsigned)boot, appIdName(g_app));
+    applyBootSkip(boot);
+    return NavDrainResult::Applied;
+  }
+  return NavDrainResult::None;
+}
+
+static InteractiveShowResult runInteractiveShow(bool refresh) {
+  bool r = refresh;
+  for (;;) {
+    const bool ok = showCurrentApp(r);
+    r = false;
+    if (!epd.wasAborted()) {
+      return ok ? InteractiveShowResult::Ok : InteractiveShowResult::Fail;
+    }
+    Serial.println("[UI] EPD refresh interrupted by key");
+    const NavDrainResult nav = drainNavAfterEpdAbort();
+    if (nav == NavDrainResult::OpenWeb) return InteractiveShowResult::WantWeb;
+    if (nav == NavDrainResult::Applied) {
+      persistUi();
+      continue;  // draw the page the user stopped on
+    }
+    // Aborted with no counted click — finish the same page cleanly.
+    continue;
+  }
+}
+
+// Enter / toggle config web UI (also used when UP-long interrupts an EPD refresh).
+static bool enterConfigWeb() {
+  const bool in_web = webIsRunning();
+  bool force_ap = false;
+  bool allow_ap = true;
+  if (in_web) {
+    if (webIsAp()) {
+      force_ap = false;
+      allow_ap = false;
+      Serial.println("[UI] UP long -> WiFi mode");
+    } else {
+      force_ap = true;
+      Serial.println("[UI] UP long -> AP mode");
+    }
+  } else {
+    Serial.println("[UI] UP long -> config web");
+  }
+  bool ok = webStart(force_ap, allow_ap);
+  if (!ok && in_web && !force_ap) {
+    Serial.println("[UI] WiFi failed, restore AP");
+    ok = webStart(true);
+  }
+  if (!ok) ledSet(LedPattern::ErrorBurst);
+  drawConfigWebPage(ok);
+  return ok;
 }
 
 void setup() {
@@ -354,6 +463,7 @@ void setup() {
           else if (g_app == AppId::Weather) saveWeatherLastUnix((uint32_t)now);
         }
       }
+      epd.suppressInterruptOnce();
       const bool ok = showCurrentApp(g_app == AppId::Album);
       Serial.printf("[PWR] timer refresh ok=%d -> sleep\n", (int)ok);
       persistUi();
@@ -377,11 +487,6 @@ void setup() {
 }
 
 void loop() {
-  static uint32_t up_since = 0;
-  static bool up_prev = false;
-  static bool up_long_done = false;
-  static uint8_t up_clicks = 0;
-  static uint32_t up_last_ms = 0;
   static bool busy = false;
 
   powerPoll(true);
@@ -389,18 +494,14 @@ void loop() {
   webLoop();
 
   const bool boot = powerBootHeld();
-  const bool up = digitalRead(PIN_BTN_UP) == LOW;
+  const bool up = powerUpHeld();
   const bool in_web = webIsRunning();
   if (boot || up) powerIdleTouch();
   powerIdlePoll(in_web);
 
-  // While BOOT is held, freeze UP edge tracking (avoid crosstalk with front button)
+  // While BOOT is held, freeze nav shorts (powerPoll already freezes UP)
   if (boot) {
-    up_since = 0;
-    up_long_done = false;
-    up_prev = up;
-    up_clicks = 0;
-    powerClearDownClicks();
+    powerClearNavClicks();
     return;
   }
 
@@ -418,12 +519,32 @@ void loop() {
       }
       ledOff();
     }
-    up_since = 0;
-    up_long_done = false;
-    up_clicks = 0;
-    up_prev = digitalRead(PIN_BTN_UP) == LOW;
     suppressKeys(80);
     busy = false;
+  };
+
+  auto runShow = [&](bool refresh) {
+    const InteractiveShowResult sr = runInteractiveShow(refresh);
+    if (sr == InteractiveShowResult::WantWeb) {
+      ledSet(LedPattern::BlinkSlow);
+      const bool ok = enterConfigWeb();
+      if (ok) {
+        ledDoneFlash();
+      } else {
+        ledSet(LedPattern::ErrorBurst);
+        const uint32_t t = millis();
+        while (millis() - t < 1800) {
+          ledUpdate();
+          powerPoll(false);
+          delay(10);
+        }
+        ledOff();
+      }
+      suppressKeys(500);
+      busy = false;
+      return;
+    }
+    finishAction(sr == InteractiveShowResult::Ok);
   };
 
   // App 定时任务：仅当「停留在对应 App」时才跑（配置页 / 按键忙碌不计）
@@ -432,8 +553,7 @@ void loop() {
       busy = true;
       Serial.printf("[UI] weather auto-refresh (every %u s)\n",
                     (unsigned)getAppConfig().weather_refresh_sec);
-      const bool ok = showCurrentApp(false);
-      finishAction(ok);
+      runShow(false);
       return;
     }
     if (g_app == AppId::Album && albumAutoRefreshDue()) {
@@ -444,15 +564,13 @@ void loop() {
         const time_t now = time(nullptr);
         if (now >= 1700000000) saveAlbumLastUnix((uint32_t)now);  // 先占槽，防连刷
       }
-      const bool ok = showCurrentApp(true);  // 翻下一张
-      finishAction(ok);
+      runShow(true);  // 翻下一张
       return;
     }
     if (g_app == AppId::Calendar && calendarAutoRefreshDue()) {
       busy = true;
       Serial.println("[UI] calendar midnight auto-refresh");
-      const bool ok = showCurrentApp(false);
-      finishAction(ok);
+      runShow(false);
       return;
     }
   }
@@ -468,12 +586,10 @@ void loop() {
         g_app = appIdFirstEnabled();
         Serial.printf("[UI] web exit: %s disabled -> %s\n", appIdName(was), appIdName(g_app));
       }
-      const bool ok = showCurrentApp(false);
-      finishAction(ok);
+      runShow(false);
       return;
     }
-    powerClearDownClicks();
-    up_clicks = 0;
+    powerClearNavClicks();
   } else if (!busy) {
     const uint8_t n = powerTakeBootBurst();
     if (n) {
@@ -485,129 +601,60 @@ void loop() {
         Serial.printf("[UI] BOOT: %s disabled -> %s\n", appIdName(was), appIdName(g_app));
       }
       Serial.printf("[UI] BOOT x%u app=%s\n", (unsigned)n, appIdName(g_app));
-      bool ok = false;
-      if (g_app == AppId::Weather) {
-        for (uint8_t i = 0; i < n; i++) g_weather_mode = weatherModeNext(g_weather_mode);
-        Serial.printf("[UI] weather skip %u -> %s\n", (unsigned)n, weatherModeName(g_weather_mode));
-        persistUi();  // keep mode if fetch/WDT resets before finishAction
-        ok = showCurrentApp(false);
-      } else if (g_app == AppId::Album) {
-        const int count = albumCountCached();
-        if (count > 0) g_album_index = (g_album_index + (int)n) % count;
-        Serial.printf("[UI] album skip %u -> %d/%d\n", (unsigned)n, g_album_index, count);
-        persistUi();
-        ok = showCurrentApp(false);
-      } else {
-        ok = showCurrentApp(false);
-      }
-      finishAction(ok);
+      applyBootSkip(n);
+      persistUi();  // keep mode/index if fetch/WDT resets before finishAction
+      runShow(false);
       return;
     }
   }
 
   const bool keys_blocked = busy || (millis() < g_ignore_keys_until);
   if (keys_blocked) {
-    // Keep edge detectors in sync but do not act / accumulate
-    if (!up) {
-      up_since = 0;
-      up_long_done = false;
-    } else if (up_since == 0) {
-      up_since = millis();
-      up_long_done = false;
-    }
-    up_prev = up;
-    up_clicks = 0;
-    powerClearDownClicks();
+    powerClearNavClicks();
     return;
   }
 
-  // UP: long → web; short releases accumulate → prev app(s) after combo quiet
-  if (up) {
-    if (up_since == 0) {
-      up_since = millis();
-      up_long_done = false;
+  // UP long → config web
+  if (powerTakeUpLong()) {
+    busy = true;
+    ledSet(LedPattern::BlinkSlow);
+    const bool ok = enterConfigWeb();
+    if (ok) {
+      ledDoneFlash();
+    } else {
+      ledSet(LedPattern::ErrorBurst);
+      const uint32_t t = millis();
+      while (millis() - t < 1800) {
+        ledUpdate();
+        powerPoll(false);
+        delay(10);
+      }
+      ledOff();
     }
-    if (!up_long_done && (millis() - up_since > 1500)) {
-      up_long_done = true;
-      up_clicks = 0;
-      powerClearDownClicks();
+    suppressKeys(500);
+    busy = false;
+    return;
+  }
+
+  if (!in_web && !busy) {
+    const uint8_t up_n = powerTakeUpBurst();
+    if (up_n) {
       busy = true;
-      ledAckFlash();
-      ledSet(LedPattern::BlinkSlow);
-      bool force_ap = false;
-      bool allow_ap = true;
-      if (in_web) {
-        if (webIsAp()) {
-          force_ap = false;
-          allow_ap = false;
-          Serial.println("[UI] UP long -> WiFi mode");
-        } else {
-          force_ap = true;
-          Serial.println("[UI] UP long -> AP mode");
-        }
-      } else {
-        Serial.println("[UI] UP long -> config web");
-      }
-      bool ok = webStart(force_ap, allow_ap);
-      if (!ok && in_web && !force_ap) {
-        Serial.println("[UI] WiFi failed, restore AP");
-        ok = webStart(true);
-      }
-      if (!ok) ledSet(LedPattern::ErrorBurst);
-      drawConfigWebPage(ok);
-      if (ok) {
-        ledDoneFlash();
-      } else {
-        ledSet(LedPattern::ErrorBurst);
-        const uint32_t t = millis();
-        while (millis() - t < 1800) {
-          ledUpdate();
-          powerPoll(false);
-          delay(10);
-        }
-        ledOff();
-      }
-      suppressKeys(500);
-      busy = false;
-      up_prev = digitalRead(PIN_BTN_UP) == LOW;
+      skipApps(-(int)up_n);
+      Serial.printf("[UI] UP x%u -> %s\n", (unsigned)up_n, appIdName(g_app));
+      runShow(false);
       return;
     }
-  } else {
-    if (up_prev && !up_long_done && up_since != 0) {
-      const uint32_t held = millis() - up_since;
-      if (held >= 40 && !in_web) {
-        if (up_clicks < 40) up_clicks++;
-        up_last_ms = millis();
-      }
-    }
-    up_since = 0;
-    up_long_done = false;
-  }
-  up_prev = up;
 
-  if (!in_web && !busy && !up && up_clicks > 0 &&
-      (millis() - up_last_ms >= POWER_KEY_COMBO_MS)) {
-    const uint8_t n = up_clicks;
-    up_clicks = 0;
-    busy = true;
-    skipApps(-(int)n);
-    Serial.printf("[UI] UP x%u -> %s\n", (unsigned)n, appIdName(g_app));
-    const bool ok = showCurrentApp(false);
-    finishAction(ok);
-    return;
-  }
-
-  // DOWN short(s) → next app(s) after combo quiet (same as BOOT/album)
-  if (!in_web && !busy) {
-    const uint8_t n = powerTakeDownBurst();
-    if (n) {
+    const uint8_t dn = powerTakeDownBurst();
+    if (dn) {
       busy = true;
-      skipApps((int)n);
-      Serial.printf("[UI] DOWN x%u -> %s\n", (unsigned)n, appIdName(g_app));
-      const bool ok = showCurrentApp(false);
-      finishAction(ok);
+      skipApps((int)dn);
+      Serial.printf("[UI] DOWN x%u -> %s\n", (unsigned)dn, appIdName(g_app));
+      runShow(false);
+      return;
     }
   } else if (in_web) {
-    powerClearDownClicks();
+    powerClearNavClicks();
   }
 }

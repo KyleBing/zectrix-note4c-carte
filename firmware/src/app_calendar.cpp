@@ -278,7 +278,7 @@ bool calendarShow(EpdSsd2683 &epd) {
     fontDrawTextWrapped(epd, cx, ty, tw + 4, ty + th, lab, Theme::Fg, Theme::Bg);
   }
 
-  epd.display();
+  if (!epd.display()) return epd.wasAborted();
   g_cal_drawn_ymd = ymdFromParts(now.year, now.month, now.day);
   return true;
 }

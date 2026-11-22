@@ -189,7 +189,7 @@ void splashDraw(EpdSsd2683 &epd) {
   drawCentered(epd, line1_y, kGithub, Theme::Fg, false);
   drawCentered(epd, line2_y, "刷机完成, 按任意键继续", Theme::Alert, false);
 
-  epd.display();
+  epd.display(false);
 }
 
 bool splashShowIfNeeded(EpdSsd2683 &epd) {

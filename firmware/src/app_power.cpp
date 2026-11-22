@@ -66,12 +66,21 @@ static bool g_down_held = false;
 static uint8_t g_down_clicks = 0;
 static uint32_t g_down_last_ms = 0;
 
+static uint32_t g_up_since = 0;
+static bool g_up_long_done = false;
+static bool g_up_held = false;
+static bool g_up_long_latched = false;
+static uint8_t g_up_clicks = 0;
+static uint32_t g_up_last_ms = 0;
+
 static uint32_t g_idle_since = 0;
 static uint32_t g_idle_sec = 0;
 
 static bool g_boot_down = false;
 static uint8_t g_boot_clicks = 0;
 static uint32_t g_boot_last_ms = 0;
+
+static bool g_nav_armed = true;
 
 static AppId g_fg_app = AppId::Todo;
 
@@ -87,7 +96,37 @@ static void pollBootClicks() {
   g_boot_down = boot;
 }
 
+static void pollUpClicks(bool latch_short) {
+  const bool up = digitalRead(PIN_BTN_UP) == LOW;
+  g_up_held = up;
+  if (up) {
+    powerIdleTouch();
+    if (g_up_since == 0) {
+      g_up_since = millis();
+      g_up_long_done = false;
+    }
+    if (!g_up_long_done && (millis() - g_up_since > 1500)) {
+      g_up_long_done = true;
+      g_up_clicks = 0;
+      g_up_long_latched = true;
+      ledAckFlash();
+    }
+    return;
+  }
+  if (g_up_since != 0 && !g_up_long_done) {
+    const uint32_t held = millis() - g_up_since;
+    if (latch_short && held >= 40 && held < 1500) {
+      if (g_up_clicks < 40) g_up_clicks++;
+      g_up_last_ms = millis();
+    }
+  }
+  g_up_since = 0;
+  g_up_long_done = false;
+}
+
 bool powerBootHeld() { return g_boot_down; }
+
+bool powerUpHeld() { return g_up_held; }
 
 uint8_t powerTakeBootClicksNow() {
   const uint8_t n = g_boot_clicks;
@@ -111,7 +150,56 @@ uint8_t powerTakeDownBurst() {
   return n;
 }
 
+uint8_t powerTakeDownClicksNow() {
+  const uint8_t n = g_down_clicks;
+  g_down_clicks = 0;
+  return n;
+}
+
 void powerClearDownClicks() { g_down_clicks = 0; }
+
+uint8_t powerTakeUpBurst() {
+  if (g_up_clicks == 0 || g_up_held) return 0;
+  if (millis() - g_up_last_ms < POWER_KEY_COMBO_MS) return 0;
+  const uint8_t n = g_up_clicks;
+  g_up_clicks = 0;
+  return n;
+}
+
+uint8_t powerTakeUpClicksNow() {
+  const uint8_t n = g_up_clicks;
+  g_up_clicks = 0;
+  return n;
+}
+
+void powerClearUpClicks() { g_up_clicks = 0; }
+
+bool powerTakeUpLong() {
+  if (!g_up_long_latched) return false;
+  g_up_long_latched = false;
+  return true;
+}
+
+void powerNavDisarmUntilRelease() { g_nav_armed = false; }
+
+bool powerNavArmed() { return g_nav_armed; }
+
+bool powerNavAnyHeld() { return g_boot_down || g_down_held || g_up_held; }
+
+bool powerNavShouldAbort() {
+  if (!g_nav_armed) return false;
+  if (g_boot_clicks || g_down_clicks || g_up_clicks) return true;
+  if (g_up_long_latched) return true;
+  if (g_boot_down || g_down_held || g_up_held) return true;
+  return false;
+}
+
+void powerClearNavClicks() {
+  g_boot_clicks = 0;
+  g_down_clicks = 0;
+  g_up_clicks = 0;
+  g_up_long_latched = false;
+}
 
 void powerBegin() {
   // 默认 5s；HTTPS / 四色全刷经常更长。只拉长超时，不额外订阅 loop 任务。
@@ -145,7 +233,15 @@ void powerBegin() {
   g_down_long_done = false;
   g_down_held = false;
   g_down_clicks = 0;
+  g_up_since = 0;
+  g_up_long_done = false;
+  g_up_held = false;
+  g_up_long_latched = false;
+  g_up_clicks = 0;
+  g_nav_armed = true;
   g_idle_since = millis();
+  pinMode(PIN_BTN_UP, INPUT_PULLUP);
+  pinMode(PIN_BTN_BOOT, INPUT_PULLUP);
 }
 
 void powerIdleTouch() { g_idle_since = millis(); }
@@ -341,8 +437,23 @@ void powerOffNow() {
 void powerPoll(bool latch_short) {
   wdtPet();
   pollBootClicks();
+
+  // While BOOT held, freeze UP edge tracking (crosstalk with front button).
+  const bool boot = g_boot_down;
+  if (boot) {
+    g_up_since = 0;
+    g_up_long_done = false;
+    g_up_held = digitalRead(PIN_BTN_UP) == LOW;
+    g_up_clicks = 0;
+    g_up_long_latched = false;
+  } else {
+    pollUpClicks(latch_short);
+  }
+
   const bool down = digitalRead(PIN_BTN_DOWN) == LOW;
   g_down_held = down;
+  if (!g_nav_armed && !powerNavAnyHeld()) g_nav_armed = true;
+
   if (down) {
     powerIdleTouch();
     if (g_down_since == 0) {

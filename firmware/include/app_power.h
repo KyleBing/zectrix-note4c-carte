@@ -13,18 +13,33 @@ void powerBegin();
 void powerNotifyForegroundApp(AppId id);
 
 // Call often (loop + blocking waits). If DOWN held ~3s → soft off (deep sleep).
-// latch_short=true counts short DOWN releases into the combo burst.
-// During EPD refresh pass latch_short=false so bumps don't queue as app switches.
+// latch_short=true counts short DOWN/UP releases into combo bursts.
+// EPD interrupt path: disarm until release, then latch_short=true so new keys abort.
 void powerPoll(bool latch_short = true);
 
 // DOWN short-release combo (same timing as BOOT).
 uint8_t powerTakeDownBurst();  // 0 until quiet POWER_KEY_COMBO_MS after last click
+uint8_t powerTakeDownClicksNow();
 void powerClearDownClicks();
+
+// UP short-release combo (prev app); long hold latched separately.
+uint8_t powerTakeUpBurst();
+uint8_t powerTakeUpClicksNow();
+void powerClearUpClicks();
+bool powerTakeUpLong();  // true once after UP held ~1.5s
+bool powerUpHeld();
 
 // BOOT releases: counted even during EPD waitBusy (powerPoll).
 uint8_t powerTakeBootBurst();      // 0 until quiet after last click
 uint8_t powerTakeBootClicksNow();  // drain immediately (web exit)
 bool powerBootHeld();
+
+// EPD mid-refresh interrupt helpers.
+void powerNavDisarmUntilRelease();  // ignore trigger-key release; arm after all keys up
+bool powerNavArmed();
+bool powerNavAnyHeld();
+bool powerNavShouldAbort();  // armed and (pending click or nav key down / UP long)
+void powerClearNavClicks();  // BOOT + DOWN + UP shorts (+ clear UP long latch)
 
 // Soft power-off:
 // - 当前 App 需要定时醒 → 保持 PWR_HOLD + ESP 定时（+可选 RTC）深睡；DOWN 可醒
