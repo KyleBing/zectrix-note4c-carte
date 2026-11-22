@@ -15,6 +15,11 @@
 #include <ctime>
 #include <time.h>
 
+enum class AlbumPendKind : uint8_t { None, Name, Preview };
+static AlbumPendKind g_pend = AlbumPendKind::None;
+static char g_pend_name[24] = "";
+static bool g_cast_busy = false;
+
 bool albumEnsureDir() {
   if (LittleFS.exists(ALBUM_DIR)) return true;
   return LittleFS.mkdir(ALBUM_DIR);
@@ -295,6 +300,52 @@ int albumDeleteAll() {
   return ok;
 }
 
+bool albumShowPath(EpdSsd2683 &epd, const char *path, const char *meta, bool allow_interrupt,
+                   bool overlay_header) {
+  if (!epd.ok() || !path || !path[0]) return false;
+
+  File f = LittleFS.open(path, "r");
+  if (!f || f.size() != (size_t)ALBUM_FRAME_BYTES) {
+    if (f) f.close();
+    epd.clear(Theme::Bg);
+    headerDrawAppBar(epd, AppId::Album, "ALBUM");
+    fontDrawTextWrapped(epd, Theme::MarginX, 40, 384, Theme::FooterY - 4, "Bad photo file",
+                        Theme::Alert);
+    epd.display(allow_interrupt);
+    return false;
+  }
+
+  uint8_t *fb = epd.framebuffer();
+  if (!fb) {
+    f.close();
+    return false;
+  }
+  const size_t n = f.read(fb, ALBUM_FRAME_BYTES);
+  f.close();
+  if (n != (size_t)ALBUM_FRAME_BYTES) {
+    Serial.printf("[Album] short read %u\n", (unsigned)n);
+    return false;
+  }
+
+  const bool do_header = overlay_header && getAppConfig().album_show_header;
+  if (do_header) {
+    headerDrawAppBar(epd, AppId::Album, "ALBUM");
+    if (meta && meta[0]) {
+      epd.drawText(72, 7, meta, Theme::HeaderAccent, Theme::HeaderBg);
+    }
+  }
+
+  Serial.printf("[Album] show path=%s meta=%s header=%d\n", path, meta ? meta : "-",
+                (int)do_header);
+  const bool ok = epd.display(allow_interrupt);
+  if (ok && overlay_header) {
+    // 仅相册 App 翻页才记 last；Web 投屏不碰定时翻页状态
+    const time_t now = time(nullptr);
+    if (now >= 1700000000) saveAlbumLastUnix((uint32_t)now);
+  }
+  return ok;
+}
+
 bool albumShow(EpdSsd2683 &epd, int index) {
   if (!epd.ok()) return false;
   AlbumList list;
@@ -317,42 +368,62 @@ bool albumShow(EpdSsd2683 &epd, int index) {
 
   char path[40];
   snprintf(path, sizeof(path), "%s/%s", ALBUM_DIR, list.names[index]);
-  File f = LittleFS.open(path, "r");
-  if (!f || f.size() != (size_t)ALBUM_FRAME_BYTES) {
-    if (f) f.close();
-    epd.clear(Theme::Bg);
-    headerDrawAppBar(epd, AppId::Album, "ALBUM");
-    fontDrawTextWrapped(epd, Theme::MarginX, 40, 384, Theme::FooterY - 4, "Bad photo file",
-                        Theme::Alert);
-    epd.display();
-    return false;
-  }
+  char meta[24];
+  snprintf(meta, sizeof(meta), "%d/%d", index + 1, list.count);
+  Serial.printf("[Album] show %s (%d/%d)\n", list.names[index], index + 1, list.count);
+  return albumShowPath(epd, path, meta, /*allow_interrupt=*/true, /*overlay_header=*/true);
+}
 
-  uint8_t *fb = epd.framebuffer();
-  if (!fb) {
-    f.close();
-    return false;
-  }
-  const size_t n = f.read(fb, ALBUM_FRAME_BYTES);
-  f.close();
-  if (n != (size_t)ALBUM_FRAME_BYTES) {
-    Serial.printf("[Album] short read %u\n", (unsigned)n);
-    return false;
-  }
+bool albumRequestDisplayName(const char *name) {
+  if (!albumNameOk(name)) return false;
+  char path[40];
+  snprintf(path, sizeof(path), "%s/%s", ALBUM_DIR, name);
+  if (!LittleFS.exists(path)) return false;
+  strncpy(g_pend_name, name, sizeof(g_pend_name) - 1);
+  g_pend_name[sizeof(g_pend_name) - 1] = '\0';
+  g_pend = AlbumPendKind::Name;
+  Serial.printf("[Album] queue cast name=%s\n", g_pend_name);
+  return true;
+}
 
-  if (getAppConfig().album_show_header) {
-    headerDrawAppBar(epd, AppId::Album, "ALBUM");
-    char meta[24];
-    snprintf(meta, sizeof(meta), "%d/%d", index + 1, list.count);
-    epd.drawText(72, 7, meta, Theme::HeaderAccent, Theme::HeaderBg);
-  }
+bool albumRequestDisplayPreview() {
+  File f = LittleFS.open(ALBUM_PREVIEW_PATH, "r");
+  const size_t sz = f ? f.size() : 0;
+  if (f) f.close();
+  if (sz != (size_t)ALBUM_FRAME_BYTES) return false;
+  g_pend_name[0] = '\0';
+  g_pend = AlbumPendKind::Preview;
+  Serial.println("[Album] queue cast preview");
+  return true;
+}
 
-  Serial.printf("[Album] show %s (%d/%d) header=%d\n", list.names[index], index + 1, list.count,
-                (int)getAppConfig().album_show_header);
-  const bool ok = epd.display();
-  if (ok) {
-    const time_t now = time(nullptr);
-    if (now >= 1700000000) saveAlbumLastUnix((uint32_t)now);
+bool albumDisplayPending() { return g_pend != AlbumPendKind::None; }
+
+bool albumCastBusy() { return g_cast_busy; }
+
+void albumSetCastBusy(bool busy) { g_cast_busy = busy; }
+
+bool albumTakeDisplay(EpdSsd2683 &epd, bool *out_ok) {
+  if (out_ok) *out_ok = false;
+  if (g_pend == AlbumPendKind::None) return false;
+
+  const AlbumPendKind kind = g_pend;
+  char name[24];
+  strncpy(name, g_pend_name, sizeof(name) - 1);
+  name[sizeof(name) - 1] = '\0';
+  g_pend = AlbumPendKind::None;
+  g_pend_name[0] = '\0';
+
+  bool ok = false;
+  if (kind == AlbumPendKind::Name) {
+    char path[40];
+    snprintf(path, sizeof(path), "%s/%s", ALBUM_DIR, name);
+    // Web 配置页投屏：原样刷帧，不切 App、不叠相册标题栏
+    ok = albumShowPath(epd, path, nullptr, /*allow_interrupt=*/false, /*overlay_header=*/false);
+  } else if (kind == AlbumPendKind::Preview) {
+    ok = albumShowPath(epd, ALBUM_PREVIEW_PATH, nullptr, /*allow_interrupt=*/false,
+                       /*overlay_header=*/false);
   }
-  return ok;
+  if (out_ok) *out_ok = ok;
+  return true;
 }

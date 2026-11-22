@@ -10,6 +10,13 @@ static WebServer *g_srv = nullptr;
 static File g_up_file;
 static bool g_up_ok = false;
 static char g_up_name[24] = "";
+static File g_cast_file;
+static bool g_cast_ok = false;
+static size_t g_cast_bytes = 0;
+
+static bool albumCastBlocked() {
+  return albumCastBusy() || albumDisplayPending();
+}
 
 void webAlbumAppendPage(String &b) {
   b += F(
@@ -26,6 +33,7 @@ void webAlbumAppendPage(String &b) {
       "<button type=button id=btnPan class=secondary>平移</button>"
       "<button type=button id=btnFit class=secondary>铺满</button>"
       "<button type=button id=btnContain class=secondary>完整</button>"
+      "<button type=button id=btnInvert class=secondary title=反色>反色</button>"
       "<button type=button id=btnReset class=secondary>复位</button>"
       "</div>"
       "<div class=ed-sep></div>"
@@ -49,6 +57,7 @@ void webAlbumAppendPage(String &b) {
       "<button type=button id=btnConvert class=secondary>重新抖动</button>"
       "<button type=button id=btnUpload disabled>上传</button>"
       "<button type=button id=btnSaveAs class=secondary disabled>另存</button>"
+      "<button type=button id=btnCast class=secondary disabled title=投放到墨水屏>投屏</button>"
       "</div>"
       "</div>"
       "<button type=button id=btnSideReset class='secondary ed-tool-end'>复位调节</button>"
@@ -70,7 +79,7 @@ void webAlbumAppendPage(String &b) {
          "<div class=ed-foot>"
          "<h3>原图</h3>"
          "<div class=ed-row style=flex:1;margin:0;min-width:120px>"
-         "<span>缩放</span><input type=range id=zoom min=50 max=300 value=100><em id=zoomV>100%</em>"
+         "<span>缩放</span><input type=range id=zoom min=12 max=300 value=100 title='最小约原下限 50% 的 1/4'><em id=zoomV>100%</em>"
          "</div>"
          "</div>"
          "<div class=ed-foot>"
@@ -209,7 +218,7 @@ const PAL=[[0,0,0],[255,255,255],[246,199,73],[139,32,16]];
 const PN=['黑','白','黄','红'];
 function $(id){return document.getElementById(id)}
 function val(id){return +$(id).value}
-let img=null,packed=null,rules=[],mapTo=-1,selRule=-1,cover=true,tool='pan',grain=true;
+let img=null,packed=null,rules=[],mapTo=-1,selRule=-1,cover=true,tool='pan',grain=true,invert=false;
 let rulesHist=[],RULES_HIST_MAX=40;
 let mixN=4;
 const MIX_N_LAB={1:'1×1',2:'1×2',3:'√3',4:'2×2',9:'3×3'};
@@ -378,6 +387,7 @@ function applyPixel(r,g,b){
   const hue=val('hue'),tmp=val('tmp'),tint=val('tint'),chTh=val('chr');
   const gma=Math.max(0.1,val('gma')||gammaFromMid());
   const yb=val('yel')/100,rb=val('red')/100;
+  if(invert){r=255-r;g=255-g;b=255-b;}
   r=r*br;g=g*br;b=b*br;
   r=(r-128)*co+128;g=(g-128)*co+128;b=(b-128)*co+128;
   r+=tmp*1.15;b-=tmp*1.15;
@@ -642,6 +652,7 @@ function run(dither){
   pack(useGrain);
   $('btnUpload').disabled=false;
   $('btnSaveAs').disabled=false;
+  $('btnCast').disabled=false;
   $('btnUpload').textContent=editName?'覆盖':'上传';
   $('convInfo').textContent=(grain?'颗粒 ':'色块 ')+(editName?editName:'新照片');
 }
@@ -1244,6 +1255,12 @@ $('btnBrush').onclick=function(){setTool('brush');};
 $('btnPick').onclick=function(){setTool(tool==='pick'?'pan':'pick');};
 $('btnFit').onclick=function(){cover=true;schedule(true);};
 $('btnContain').onclick=function(){cover=false;schedule(true);};
+function setInvert(on,skip){
+  invert=!!on;
+  $('btnInvert').classList.toggle('on',invert);
+  if(!skip&&img) schedule(true);
+}
+$('btnInvert').onclick=function(){setInvert(!invert);};
 function resetView(){
   $('zoom').value=100;$('panx').value=0;$('pany').value=0;cover=true;
   paint=new Int8Array(W*H);paint.fill(-1);
@@ -1253,6 +1270,7 @@ function resetSide(){
   $('brt').value=100;$('con').value=100;$('gma').value=1;$('sat').value=100;
   $('hue').value=0;$('tmp').value=0;$('tint').value=0;
   $('yel').value=100;$('red').value=100;$('chr').value=8;$('dith').value=100;$('tol').value=36;
+  setInvert(false,true);
   rules=[];selRule=-1;setMapTo(-1);renderRules();setGrain(true,true);fillLevelInputs();
 }
 $('btnReset').onclick=function(){resetView();schedule(true);};
@@ -1294,6 +1312,7 @@ function loadFrom2bp(buf,name,isSaved){
     fn.textContent=(name||'frame.2bp')+'  400×300 · 无损';
     $('btnUpload').disabled=false;
     $('btnSaveAs').disabled=false;
+    $('btnCast').disabled=false;
     $('btnUpload').textContent=editName?'覆盖':'上传';
     $('convInfo').textContent='已载入 .2bp'+(editName?(' '+editName):'')+'（未重新抖动）';
     toast('已载入 .2bp');
@@ -1343,6 +1362,7 @@ async function batchImport(files){
   rules=[];selRule=-1;setMapTo(-1);renderRules();
   $('btnUpload').disabled=true;
   $('btnSaveAs').disabled=true;
+  $('btnCast').disabled=true;
   for(let i=0;i<files.length;i++){
     const f=files[i];
     const tag=(i+1)+'/'+files.length;
@@ -1385,6 +1405,7 @@ async function batchImport(files){
   if(lastSaved&&!editName) editName=lastSaved;
   $('btnUpload').disabled=!packed;
   $('btnSaveAs').disabled=!packed;
+  $('btnCast').disabled=!packed;
   if(packed) $('btnUpload').textContent=editName?'覆盖':'上传';
   await refreshList();
   const more=stopped?(' · 已中止，余下 '+(files.length-ok-fail)+' 未传'):'';
@@ -1595,6 +1616,7 @@ async function sendPacked(overwrite){
   toast('正在保存…');
   $('btnUpload').disabled=true;
   $('btnSaveAs').disabled=true;
+  $('btnCast').disabled=true;
   try{
     const r=await fetch('/album/upload'+q,{method:'POST',body:fd});
     const t=await r.text();
@@ -1608,7 +1630,50 @@ async function sendPacked(overwrite){
   }finally{
     $('btnUpload').disabled=false;
     $('btnSaveAs').disabled=false;
+    $('btnCast').disabled=false;
   }
+}
+let castCoolUntil=0;
+function castCoolLeft(){return Math.max(0,castCoolUntil-Date.now());}
+async function waitCastCool(){
+  let left=castCoolLeft();
+  while(left>0){
+    $('convInfo').textContent='墨水屏刷新中… '+Math.ceil(left/1000)+'s';
+    await new Promise(function(r){setTimeout(r,400);});
+    left=castCoolLeft();
+  }
+}
+async function castPacked(){
+  if(!packed||packed.length!==FRAME) throw new Error('请先抖动或载入完整画面');
+  if(castCoolLeft()>0) throw new Error('墨水屏刷新中，请稍候');
+  // 拷贝一份，避免 TypedArray 在上传过程中被后续操作改写
+  const bytes=new Uint8Array(packed);
+  const fd=new FormData();
+  fd.append('file',new Blob([bytes],{type:'application/octet-stream'}),'preview.2bp');
+  $('convInfo').textContent='正在投屏…';
+  toast('正在投屏到墨水屏…');
+  $('btnCast').disabled=true;
+  try{
+    const r=await fetch('/album/display-frame',{method:'POST',body:fd});
+    const t=await r.text();
+    if(!r.ok) throw new Error(t||r.status);
+    castCoolUntil=Date.now()+18000;
+    $('convInfo').textContent='已投屏，墨水屏刷新中…';
+    toast('已投屏，请等刷新完成');
+    await waitCastCool();
+    $('convInfo').textContent='投屏完成';
+  }finally{
+    $('btnCast').disabled=!packed;
+  }
+}
+async function castSaved(name){
+  if(castCoolLeft()>0) throw new Error('墨水屏刷新中，请稍候');
+  const r=await fetch('/album/display?name='+encodeURIComponent(name),{method:'POST'});
+  const t=await r.text();
+  if(!r.ok) throw new Error(t||r.status);
+  castCoolUntil=Date.now()+18000;
+  toast('已投屏 '+name+'，请等刷新完成');
+  await waitCastCool();
 }
 $('btnConvert').onclick=function(){run(true);};
 $('btnUpload').onclick=async function(){
@@ -1616,6 +1681,9 @@ $('btnUpload').onclick=async function(){
 };
 $('btnSaveAs').onclick=async function(){
   try{await sendPacked(false);}catch(e){$('convInfo').textContent='上传失败：'+e;toast('上传失败：'+e,true);}
+};
+$('btnCast').onclick=async function(){
+  try{await castPacked();}catch(e){$('convInfo').textContent='投屏失败：'+e;toast('投屏失败：'+e,true);}
 };
 async function refreshList(){
   const el=$('list');
@@ -1641,10 +1709,20 @@ async function refreshList(){
         +'<label class=show-lab><input type=checkbox data-show="'+n+'"'+(show?' checked':'')+'>展示</label>'
         +'<code>'+n+'</code></div>'
         +'<div class="row acts">'
-        +'<button type=button class=secondary data-dl="'+n+'" title="下载无损 .2bp">下载 .2bp</button>'
+        +'<button type=button data-cast="'+n+'" title="投放到墨水屏">投屏</button>'
         +'<button type=button class=secondary data-edit="'+n+'">编辑</button>'
+        +'<button type=button class=secondary data-dl="'+n+'" title="下载无损 .2bp">下载</button>'
         +'<button type=button class=danger data-del="'+n+'">删</button></div></div>';
     }).join('');
+    el.querySelectorAll('[data-cast]').forEach(function(btn){
+      btn.onclick=function(ev){
+        ev.stopPropagation();
+        const name=btn.dataset.cast;
+        btn.disabled=true;
+        castSaved(name).catch(function(e){toast('投屏失败：'+e,true);})
+          .finally(function(){btn.disabled=false;});
+      };
+    });
     el.querySelectorAll('[data-dl]').forEach(function(btn){
       btn.onclick=function(ev){
         ev.stopPropagation();
@@ -1977,6 +2055,94 @@ static void handleAlbumFileGet() {
   f.close();
 }
 
+// POST /album/display?name=001.2bp — 无 upload 回调（空 body 挂 upload 会空指针崩）
+static void handleAlbumDisplayByName() {
+  if (albumCastBlocked()) {
+    g_srv->send(503, "text/plain", "墨水屏刷新中，请稍候再投屏");
+    return;
+  }
+  const String name = g_srv->arg("name");
+  if (!albumRequestDisplayName(name.c_str())) {
+    g_srv->send(400, "text/plain", "找不到该照片");
+    return;
+  }
+  g_srv->send(200, "text/plain", "ok");
+}
+
+// POST /album/display-frame + multipart .2bp — 投屏当前编辑帧
+// 先写入 tmp，完整 30000 字节后再替换 preview，避免半截/空包毁掉上一帧。
+static void handleAlbumDisplayFile() {
+  HTTPUpload &up = g_srv->upload();
+  if (up.status == UPLOAD_FILE_START) {
+    g_cast_ok = false;
+    g_cast_bytes = 0;
+    if (g_cast_file) g_cast_file.close();
+    if (LittleFS.exists(ALBUM_PREVIEW_TMP)) LittleFS.remove(ALBUM_PREVIEW_TMP);
+    g_cast_file = LittleFS.open(ALBUM_PREVIEW_TMP, "w");
+    g_cast_ok = (bool)g_cast_file;
+    Serial.printf("[Album] cast upload -> %s ok=%d\n", ALBUM_PREVIEW_TMP, (int)g_cast_ok);
+  } else if (up.status == UPLOAD_FILE_WRITE) {
+    if (g_cast_ok && g_cast_file) {
+      if (g_cast_bytes + up.currentSize > (size_t)ALBUM_FRAME_BYTES) {
+        g_cast_ok = false;
+      } else {
+        const size_t n = g_cast_file.write(up.buf, up.currentSize);
+        if (n != up.currentSize) {
+          g_cast_ok = false;
+        } else {
+          g_cast_bytes += n;
+        }
+      }
+    }
+  } else if (up.status == UPLOAD_FILE_END) {
+    if (g_cast_file) g_cast_file.close();
+    if (!g_cast_ok || g_cast_bytes != (size_t)ALBUM_FRAME_BYTES) {
+      if (LittleFS.exists(ALBUM_PREVIEW_TMP)) LittleFS.remove(ALBUM_PREVIEW_TMP);
+      g_cast_ok = false;
+      Serial.printf("[Album] cast upload bad size=%u (want %d)\n", (unsigned)g_cast_bytes,
+                    ALBUM_FRAME_BYTES);
+    } else {
+      if (LittleFS.exists(ALBUM_PREVIEW_PATH)) LittleFS.remove(ALBUM_PREVIEW_PATH);
+      if (!LittleFS.rename(ALBUM_PREVIEW_TMP, ALBUM_PREVIEW_PATH)) {
+        // rename 失败则尝试读 tmp 再写正式路径
+        File src = LittleFS.open(ALBUM_PREVIEW_TMP, "r");
+        File dst = LittleFS.open(ALBUM_PREVIEW_PATH, "w");
+        bool copied = false;
+        if (src && dst) {
+          uint8_t buf[512];
+          copied = true;
+          while (src.available()) {
+            const int n = src.read(buf, sizeof(buf));
+            if (n <= 0 || (int)dst.write(buf, n) != n) {
+              copied = false;
+              break;
+            }
+          }
+        }
+        if (src) src.close();
+        if (dst) dst.close();
+        LittleFS.remove(ALBUM_PREVIEW_TMP);
+        g_cast_ok = copied;
+      }
+      if (g_cast_ok) Serial.println("[Album] cast upload done");
+      else Serial.println("[Album] cast upload rename/copy failed");
+    }
+  }
+}
+
+static void handleAlbumDisplayFrameDone() {
+  if (albumCastBlocked()) {
+    g_srv->send(503, "text/plain", "墨水屏刷新中，请稍候再投屏");
+    return;
+  }
+  if (!g_cast_ok || !albumRequestDisplayPreview()) {
+    // 400×300 四色帧 = 30000 字节；空包/半截多半是刷屏期间又点了一次
+    g_srv->send(400, "text/plain", "投屏数据不完整，请等刷新结束后再试");
+    return;
+  }
+  g_srv->send(200, "text/plain", "ok");
+}
+
 void webAlbumRegisterRoutes(WebServer &server) {
   g_srv = &server;
   server.on("/album/list", HTTP_GET, handleAlbumList);
@@ -1988,4 +2154,6 @@ void webAlbumRegisterRoutes(WebServer &server) {
   server.on("/album/schedule", HTTP_POST, handleAlbumSchedule);
   server.on("/album/file", HTTP_GET, handleAlbumFileGet);
   server.on("/album/upload", HTTP_POST, handleAlbumUploadDone, handleAlbumUploadFile);
+  server.on("/album/display", HTTP_POST, handleAlbumDisplayByName);
+  server.on("/album/display-frame", HTTP_POST, handleAlbumDisplayFrameDone, handleAlbumDisplayFile);
 }

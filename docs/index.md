@@ -13,6 +13,9 @@ hero:
       text: 固件功能
       link: /features/
     - theme: alt
+      text: App 功能
+      link: /features/apps
+    - theme: alt
       text: 行为机制
       link: /features/behavior
     - theme: alt
@@ -24,7 +27,7 @@ hero:
 
 features:
   - title: 多 App + Web 配网
-    details: 待办 / 日历 / 天气 / 相册；长按上键开配置站；Portal 登录与和风代理
+    details: 待办日记、月历农历、和风 NOW/7D、四色相册；长按上键开配置站做配网与上传
   - title: 按键与可打断全刷
     details: UP/DOWN 切 App，BOOT 只做页内动作；四色全刷约 10s+，刷屏中按键可立刻中断并切到目标页
   - title: 错误可追溯
@@ -51,4 +54,4 @@ pio run -t upload       # 刷写
 pio device monitor      # 串口 115200
 ```
 
-更多：[固件功能说明](/features/) · [行为机制](/features/behavior) · [硬件参数](/hardware/note4c)
+更多：[固件功能说明](/features/) · [App 功能说明](/features/apps) · [行为机制](/features/behavior) · [硬件参数](/hardware/note4c)

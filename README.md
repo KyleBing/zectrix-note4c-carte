@@ -31,8 +31,9 @@ npm run build
 
 | 页面 | 说明 |
 | --- | --- |
-| [固件功能](docs/features/index.md) | 能力表、按键、Web 路径、刷写与字库 |
-| [行为机制](docs/features/behavior.md) | 上电/按键/屏幕刷新（可中断全刷）/App/Web/错误日志 |
+| [固件功能](docs/features/index.md) | 总览、按键、刷写与字库 |
+| [App 功能](docs/features/apps.md) | 待办 / 日历 / 天气 / 相册 / Web 配置 |
+| [行为机制](docs/features/behavior.md) | 上电/按键/屏幕刷新（可中断全刷）/错误日志 |
 | [硬件参数](docs/hardware/note4c.md) | 完整规格 / 引脚 / bpp / BWRY |
 
 ## 固件

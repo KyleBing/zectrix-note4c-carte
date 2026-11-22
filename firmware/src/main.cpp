@@ -576,6 +576,31 @@ void loop() {
   }
 
   if (in_web) {
+    // Web 配置页投屏：只刷墨水屏，不切换当前 App / 相册索引
+    if (!busy && albumDisplayPending()) {
+      busy = true;
+      albumSetCastBusy(true);
+      powerIdleTouch();
+      Serial.println("[UI] web cast -> EPD (stay in config web)");
+      bool ok = false;
+      albumTakeDisplay(epd, &ok);
+      albumSetCastBusy(false);
+      if (ok) {
+        ledDoneFlash();
+      } else {
+        ledSet(LedPattern::ErrorBurst);
+        const uint32_t t = millis();
+        while (millis() - t < 1200) {
+          ledUpdate();
+          powerPoll(false);
+          delay(10);
+        }
+        ledOff();
+      }
+      suppressKeys(80);
+      busy = false;
+      return;
+    }
     if (powerTakeBootClicksNow()) {
       busy = true;
       Serial.println("[UI] BOOT -> exit web");

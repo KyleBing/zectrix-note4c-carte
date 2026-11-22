@@ -70,6 +70,7 @@ export default defineConfig({
         text: '固件',
         items: [
           { text: '功能说明', link: '/features/' },
+          { text: 'App 功能', link: '/features/apps' },
           { text: '行为机制', link: '/features/behavior' },
           {
             text: '下载最新固件',
@@ -94,6 +95,7 @@ export default defineConfig({
         items: [
           { text: '简介', link: '/' },
           { text: '固件功能', link: '/features/' },
+          { text: 'App 功能', link: '/features/apps' },
           { text: '行为机制', link: '/features/behavior' },
         ],
       },
