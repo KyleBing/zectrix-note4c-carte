@@ -1,14 +1,36 @@
 <img width="120" src="design/favicon.svg" alt="LOGO" />
 
-<img width="6000" height="4000" alt="2026-11-20 zectrix note4c-天气预报-06" src="https://github.com/user-attachments/assets/5aa36b6a-1ee2-4a6b-ae88-1ceaf5656505" />
 
-<img width="6000" height="4000" alt="2026-11-19 zectrix note4c-06" src="https://github.com/user-attachments/assets/4e880ca3-fbe2-4deb-9fbc-f8948c13cea9" />
-
-
-
-# Carte
-
+#  Carte
 面向 **ZECTRIX NOTE4C** 四色墨水屏的开放固件（多 App + Web 配网）。
+
+## 一、主要功能
+- 相册
+- 日历
+- 天气预报
+    - 未来 6 小时
+    - 未来 7 天
+- web配置页面
+
+## 二、一些实际显示效果
+
+<img width="6000" height="4000" alt="2026-11-20 zectrix note4c-天气预报-06" src="https://github.com/user-attachments/assets/5aa36b6a-1ee2-4a6b-ae88-1ceaf5656505" />
+<img width="6000" height="4000" alt="2026-11-19 zectrix note4c-06" src="https://github.com/user-attachments/assets/4e880ca3-fbe2-4deb-9fbc-f8948c13cea9" />
+<img width="6000" height="4000" alt="2026-11-22 zectrix note4c -相册-03" src="https://github.com/user-attachments/assets/6b17bb4b-0f9d-43ae-86e5-d1f2cf849fcc" />
+<img width="6000" height="4000" alt="2026-11-22 zectrix note4c -相册-04" src="https://github.com/user-attachments/assets/b3b12a39-48a4-4533-8a2c-0f4f44525c62" />
+<img width="6000" height="4000" alt="2026-11-22 zectrix note4c -相册-05" src="https://github.com/user-attachments/assets/57fcd833-bdf9-4c5c-9fa5-058503b24ed8" />
+<img width="6000" height="4000" alt="2026-11-22 zectrix note4c -相册-06" src="https://github.com/user-attachments/assets/be8a6da3-a726-4f33-af7f-13a222460af5" />
+<img width="6000" height="4000" alt="2026-11-22 zectrix note4c -相册-07" src="https://github.com/user-attachments/assets/adc7c4f0-3294-4d87-9ca9-b4892612e9db" />
+<img width="6000" height="4000" alt="2026-11-22 zectrix note4c -相册-08" src="https://github.com/user-attachments/assets/ad611321-0ca5-444c-ab16-9073da9164a4" />
+<img width="6000" height="4000" alt="2026-11-22 zectrix note4c -相册-09" src="https://github.com/user-attachments/assets/b00dd909-a683-433c-8a3c-f13778f46a08" />
+<img width="6000" height="4000" alt="2026-11-22 zectrix note4c -相册-10" src="https://github.com/user-attachments/assets/ad5cd7ed-94bf-46ae-b1db-c4dd372983b3" />
+<img width="6000" height="4000" alt="2026-11-22 zectrix note4c -相册-12" src="https://github.com/user-attachments/assets/290b722f-d515-432d-9e8e-94607d7dfa4a" />
+<img width="6000" height="4000" alt="2026-11-22 zectrix note4c -相册-13" src="https://github.com/user-attachments/assets/e9549886-67ab-4cda-9f91-fa8e5d5620cf" />
+<img width="6000" height="4000" alt="2026-11-22 zectrix note4c -相册-14" src="https://github.com/user-attachments/assets/e23ce7b4-7bcb-4fd0-b18f-27843af02d4c" />
+<img width="6000" height="4000" alt="2026-11-22 zectrix note4c -相册-15" src="https://github.com/user-attachments/assets/6d5bcdb9-9f70-4a8d-9dba-69ee7ed0c8e2" />
+<img width="6000" height="4000" alt="2026-11-22 zectrix note4c -相册-17" src="https://github.com/user-attachments/assets/3cd2457c-f245-4eaa-88cf-05f6e27e8573" />
+
+
 
 仓库按职责拆开：
 
@@ -20,7 +42,7 @@
 
 线上文档：[GitHub Pages](https://kylebing.github.io/zectrix-note4c-carte/)
 
-## 文档
+## 三、文档
 
 ```bash
 cd docs
@@ -36,7 +58,7 @@ npm run build
 | [行为机制](docs/features/behavior.md) | 上电/按键/屏幕刷新（可中断全刷）/错误日志 |
 | [硬件参数](docs/hardware/note4c.md) | 完整规格 / 引脚 / bpp / BWRY |
 
-## 固件
+## 四、固件
 
 芯片 ESP32-S3 **16 MB Flash**，分区表 `default_16MB.csv`。详情与刷写地址见 [firmware/README.md](firmware/README.md)。
 
@@ -68,7 +90,7 @@ python3 tools/album_preview.py
 | coredump | `0xFF0000` | 64 KB |
 
 整片 `0x1000000`（16 MiB）。
-## Release
+## 五、Release
 
 推送 `v*` tag 后，GitHub Actions 会编译固件、发布 Release，并触发文档部署。
 
@@ -77,6 +99,6 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-## 仓库
+## 六、仓库
 
 https://github.com/KyleBing/zectrix-note4c-carte

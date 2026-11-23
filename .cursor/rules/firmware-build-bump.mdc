@@ -1,0 +1,11 @@
+---
+description: Firmware APP_BUILD is auto-incremented on every PlatformIO build
+alwaysApply: true
+---
+
+# Firmware build number
+
+- Every `pio run` / `./flash.sh` (build or upload) runs `firmware/bump_build.py`, which increments `APP_BUILD` in `firmware/include/app_version.h` by 1.
+- Do **not** manually bump `APP_BUILD` when the user asks to build, flash, or "build +1" — the pre-script already does it.
+- Still bump `APP_VERSION` (semver patch) only when the user explicitly asks for a version/release bump.
+- After a build, `app_version.h` will show as modified in git; that change is expected and should be committed with the related work when the user asks to commit.
