@@ -921,7 +921,7 @@ void weatherDrawNow(EpdSsd2683 &epd, const WeatherNowData &now, const WeatherHou
   (void)status;
   epd.clear(Theme::Bg);
   constexpr int kNowTop = 18;       // 上区距顶
-  constexpr int kNowIconGap = 10;   // 大图标与右侧信息
+  constexpr int kNowIconGap = 20;   // 大图标与右侧信息
   constexpr int kNowBelowGap = 15;  // 上区与下方小时柱
   int y = kNowTop;
   const int bottom = wxBottom();
@@ -997,7 +997,8 @@ void weatherDrawNow(EpdSsd2683 &epd, const WeatherNowData &now, const WeatherHou
       meta_x += ww + 12;
     }
     if (now.aqi_category.length() || now.aqi.length()) {
-      snprintf(line, sizeof(line), "空气 %s %s", now.aqi_category.c_str(), now.aqi.c_str());
+      // 类别 + AQI 数值，不再加「空气」前缀
+      snprintf(line, sizeof(line), "%s %s", now.aqi_category.c_str(), now.aqi.c_str());
       fontDrawTextWrapped(epd, meta_x, ty, imax(8, (tx + tw) - meta_x), ty + lh, line, Theme::Fg);
     }
     ty += lh + 2;
