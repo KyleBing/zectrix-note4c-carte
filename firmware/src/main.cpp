@@ -29,6 +29,8 @@
 #include "app_calendar.h"
 #include "app_weather.h"
 #include "app_album.h"
+#include "app_status.h"
+#include "app_chess.h"
 #include "app_apps.h"
 #include "app_theme.h"
 #include "app_led.h"
@@ -44,6 +46,7 @@ static EpdSsd2683 epd;
 static AppId g_app = AppId::Todo;
 static WeatherMode g_weather_mode = WeatherMode::Now;
 static int g_album_index = 0;
+static int g_chess_index = 0;
 static uint32_t g_ignore_keys_until = 0;
 
 static bool i2cAck(uint8_t addr) {
@@ -218,6 +221,15 @@ static void drawConfigWebPage(bool ok) {
     y = fontDrawTextWrapped(epd, 8, y, 384, kMaxY, "请与手机连同一 WiFi，浏览器打开上面的地址", Theme::Fg) +
         kGap;
   }
+  // 醒目提示：配置模式不计空闲关机
+  {
+    constexpr int kTipH = 22;
+    epd.fillRect(8, y, 384, kTipH, Theme::Accent);
+    epd.drawRect(8, y, 384, kTipH, Theme::Fg);
+    fontDrawTextWrapped(epd, 16, y + 3, 368, y + kTipH, "当前模式不会自动关机", Theme::Fg,
+                        Theme::Accent);
+    y = y + kTipH + kAfterBanner;
+  }
   y = drawWebPageTabs(8, y + 2, 384) + 8;
   y = fontDrawTextWrapped(epd, 8, y, 384, kMaxY,
                           ap ? "长按上键：改用同 WiFi 站点" : "长按上键：改用 AP 模式", Theme::Fg) +
@@ -227,12 +239,12 @@ static void drawConfigWebPage(bool ok) {
   const AppConfig &pcfg = getAppConfig();
   const uint32_t idle = pcfg.idle_off_sec;
   if (idle == 0) {
-    fontDrawTextWrapped(epd, 8, y, 384, kMaxY, "无操作自动关机：关闭（配置页期间不会关）", Theme::Fg);
+    fontDrawTextWrapped(epd, 8, y, 384, kMaxY, "无操作自动关机：关闭", Theme::Fg);
   } else if (pcfg.idle_off_on_power) {
-    snprintf(line, sizeof(line), "无操作 %u 秒后关机（接电也关；配置页不计）", (unsigned)idle);
+    snprintf(line, sizeof(line), "平时无操作 %u 秒关机（接电也关）", (unsigned)idle);
     fontDrawTextWrapped(epd, 8, y, 384, kMaxY, line, Theme::Fg);
   } else {
-    snprintf(line, sizeof(line), "无操作 %u 秒后关机（接电不关；配置页不计）", (unsigned)idle);
+    snprintf(line, sizeof(line), "平时无操作 %u 秒关机（接电不关）", (unsigned)idle);
     fontDrawTextWrapped(epd, 8, y, 384, kMaxY, line, Theme::Fg);
   }
   epd.display(false);
@@ -262,6 +274,15 @@ static bool showCurrentApp(bool refresh) {
       }
       return albumShow(epd, g_album_index);
     }
+    case AppId::Status:
+      return statusShow(epd);
+    case AppId::Chess: {
+      if (refresh) {
+        const int n = chessEndgameCount();
+        if (n > 0) g_chess_index = (g_chess_index + 1) % n;
+      }
+      return chessShow(epd, g_chess_index);
+    }
     default:
       return false;
   }
@@ -280,6 +301,10 @@ static void applyBootSkip(uint8_t n) {
     const int count = albumCountCached();
     if (count > 0) g_album_index = (g_album_index + (int)n) % count;
     Serial.printf("[UI] album skip %u -> %d/%d\n", (unsigned)n, g_album_index, count);
+  } else if (g_app == AppId::Chess) {
+    const int count = chessEndgameCount();
+    if (count > 0) g_chess_index = (g_chess_index + (int)n) % count;
+    Serial.printf("[UI] chess skip %u -> %d/%d\n", (unsigned)n, g_chess_index, count);
   }
 }
 

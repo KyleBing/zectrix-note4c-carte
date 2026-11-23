@@ -436,6 +436,7 @@ void powerOffNow() {
 
 void powerPoll(bool latch_short) {
   wdtPet();
+  batteryPoll();
   pollBootClicks();
 
   // While BOOT held, freeze UP edge tracking (crosstalk with front button).

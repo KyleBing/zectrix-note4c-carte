@@ -5,6 +5,7 @@
 #include "app_battery.h"
 #include "app_header.h"
 #include "app_footer.h"
+#include "app_rtc.h"
 #include "app_version.h"
 #include "app_errorlog.h"
 
@@ -81,7 +82,8 @@ static void drawCheckbox(EpdSsd2683 &epd, int x, int y, bool done) {
   }
 }
 
-void todoDrawPage(EpdSsd2683 &epd, const DiaryDetail &diary, const char *status_line) {
+void todoDrawPage(EpdSsd2683 &epd, const DiaryDetail &diary, const char *status_line,
+                  const char *refreshed_at) {
   epd.clear(EPD_WHITE);
 
   TodoItem items[TODO_ITEM_MAX];
@@ -112,6 +114,11 @@ void todoDrawPage(EpdSsd2683 &epd, const DiaryDetail &diary, const char *status_
     snprintf(line, sizeof(line), "%s", diary.date.c_str());
     epd.drawText(8, y, line, EPD_BLACK);
     y += 16;
+  }
+  // 刷新时间
+  if (refreshed_at && refreshed_at[0]) {
+    snprintf(line, sizeof(line), "刷新 %s", refreshed_at);
+    y = fontDrawTextWrapped(epd, 8, y, 384, y + 20, line, EPD_BLACK) + 1;
   }
   y += 3;  // 3px below title
   epd.drawHLine(8, y, 384, EPD_BLACK);
@@ -169,10 +176,11 @@ bool todoRefreshAndDraw(EpdSsd2683 &epd) {
 
   DiaryDetail d;
   char status[24] = "fetch...";
+  char refreshed[24] = "";
 
   auto failDraw = [&](const char *st) {
     if (d.message.length()) errorLog("todo", d.message);
-    todoDrawPage(epd, d, st);
+    todoDrawPage(epd, d, st, nullptr);
     return true;  // 已刷错误页；勿 ErrorBurst
   };
 
@@ -206,7 +214,15 @@ bool todoRefreshAndDraw(EpdSsd2683 &epd) {
     return failDraw("err");
   }
 
-  snprintf(status, sizeof(status), "OK");
-  todoDrawPage(epd, d, status);
+  // 刷新完成时刻
+  RtcDateTime now;
+  if (rtcRead(now)) {
+    snprintf(refreshed, sizeof(refreshed), "%02d-%02d %02d:%02d", now.month, now.day, now.hour,
+             now.minute);
+    snprintf(status, sizeof(status), "%02d:%02d", now.hour, now.minute);
+  } else {
+    snprintf(status, sizeof(status), "OK");
+  }
+  todoDrawPage(epd, d, status, refreshed[0] ? refreshed : nullptr);
   return true;
 }

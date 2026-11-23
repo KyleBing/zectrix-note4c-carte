@@ -445,6 +445,7 @@ String appConfigToJson(bool mask_secrets) {
   doc["tz_offset_min"] = g_cfg.tz_offset_min;
   doc["ntp_interval_days"] = g_cfg.ntp_interval_days;
   doc["apps_enabled"] = g_cfg.apps_enabled;
+  doc["apps_mask_ver"] = 2;  // 与 Status/Chess 引入对应；升级时默认打开新 App
 
   String out;
   serializeJsonPretty(doc, out);
@@ -571,6 +572,13 @@ bool appConfigFromJson(const char *json) {
   if (doc["apps_enabled"].is<int>()) {
     g_cfg.apps_enabled = (uint8_t)doc["apps_enabled"].as<int>() & appsEnabledDefaultMask();
     if (g_cfg.apps_enabled == 0) g_cfg.apps_enabled = appsEnabledDefaultMask();
+    // 旧配置无 apps_mask_ver：把新增 App（状态/象棋）默认打开一次
+    const int ver = doc["apps_mask_ver"].is<int>() ? doc["apps_mask_ver"].as<int>() : 0;
+    if (ver < 2) {
+      constexpr uint8_t kNewApps =
+          (1u << static_cast<int>(AppId::Status)) | (1u << static_cast<int>(AppId::Chess));
+      g_cfg.apps_enabled = (uint8_t)(g_cfg.apps_enabled | kNewApps);
+    }
   } else {
     g_cfg.apps_enabled = appsEnabledDefaultMask();
   }

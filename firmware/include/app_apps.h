@@ -10,6 +10,8 @@ enum class AppId : uint8_t {
   Calendar,
   Weather,
   Album,
+  Status,
+  Chess,
   Count,
 };
 
@@ -34,6 +36,10 @@ inline const char *appIdName(AppId id) {
       return "WEATHER";
     case AppId::Album:
       return "ALBUM";
+    case AppId::Status:
+      return "STATUS";
+    case AppId::Chess:
+      return "CHESS";
     default:
       return "?";
   }
@@ -49,6 +55,10 @@ inline const char *appIdLabelZh(AppId id) {
       return "天气";
     case AppId::Album:
       return "相册";
+    case AppId::Status:
+      return "状态";
+    case AppId::Chess:
+      return "象棋";
     default:
       return "?";
   }
@@ -64,6 +74,10 @@ inline const char *appIdHintZh(AppId id) {
       return "实况与预报";
     case AppId::Album:
       return "墨水屏相册";
+    case AppId::Status:
+      return "内存 / 定时刷新";
+    case AppId::Chess:
+      return "国际象棋残局";
     default:
       return "";
   }

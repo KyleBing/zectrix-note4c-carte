@@ -8,16 +8,18 @@
 #include "app_theme.h"
 #include "epd_ssd2683.h"
 
-// Draw black header bar + title, then a single-row app indicator left of battery.
+// Draw black header bar + title, then optional app indicator left of battery.
 // Idle: 3×7 white · Selected: 3×11 white · gap 2px · vertically centered.
 // title 仅适合 ASCII（6x8）；中文请在外部用 fontDrawTextWrapped 画。
+// show_indicator=false 时只画标题+电池（象棋等全屏页）。
 // Returns leftmost x of right chrome (app indicator, else battery). Keep status/title left of this.
-inline int headerDrawAppBar(EpdSsd2683 &epd, AppId id, const char *title) {
+inline int headerDrawAppBar(EpdSsd2683 &epd, AppId id, const char *title, bool show_indicator = true) {
   epd.fillRect(0, 0, 400, Theme::HeaderH, Theme::HeaderBg);
   if (title && title[0]) {
     epd.drawText(Theme::MarginX, 7, title, Theme::HeaderFg, Theme::HeaderBg);
   }
   const int bat_left = batteryDrawHeader(epd);
+  if (!show_indicator) return bat_left;
 
   constexpr int kDotW = 3;
   constexpr int kDotHIdle = 7;

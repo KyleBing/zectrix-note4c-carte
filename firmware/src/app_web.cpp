@@ -738,6 +738,15 @@ static const char *appCardSvg(AppId id) {
              "<rect x='3' y='5' width='18' height='14' rx='2'/>"
              "<circle cx='9' cy='11' r='2'/>"
              "<path d='M3 16l5-4 4 3 3-2 6 4'/></svg>";
+    case AppId::Status:
+      return "<svg viewBox='0 0 24 24' fill='none' stroke='#1a1a1a' stroke-width='2'>"
+             "<rect x='4' y='4' width='16' height='16' rx='2'/>"
+             "<path d='M8 14v-4M12 16V8M16 13v-2'/></svg>";
+    case AppId::Chess:
+      return "<svg viewBox='0 0 24 24' fill='none' stroke='#1a1a1a' stroke-width='2'>"
+             "<path d='M8 20h8M10 20v-3h4v3'/>"
+             "<path d='M9 17c0-2 1-3 3-4 2 1 3 2 3 4'/>"
+             "<circle cx='12' cy='9' r='2'/></svg>";
     default:
       return "";
   }

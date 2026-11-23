@@ -1,8 +1,14 @@
 #include "app_battery.h"
 #include "board.h"
 
+#include <Preferences.h>
+#include <ctime>
+
 // Matches LazyYoun zectrix-s3-epaper-4.2 ReadBatteryStatus curve + 1:1 divider (*2).
 // Header icon geometry mirrors Cardputer drawIconBattery / drawIconChargingBolt.
+
+static constexpr const char *kBatNs = "carte_bat";
+static constexpr const char *kUnplugKey = "unplug_u";
 
 void batteryBegin() {
   // CHRG is open-drain active-LOW; need pull-up or it floats and always looks "charging".
@@ -12,6 +18,64 @@ void batteryBegin() {
 #if defined(ADC_11db)
   analogSetPinAttenuation(PIN_BAT_ADC, ADC_11db);
 #endif
+}
+
+static uint32_t loadUnplugUnix() {
+  Preferences p;
+  if (!p.begin(kBatNs, true)) return 0;
+  const uint32_t u = p.getUInt(kUnplugKey, 0);
+  p.end();
+  return u;
+}
+
+static void saveUnplugUnix(uint32_t u) {
+  Preferences p;
+  if (!p.begin(kBatNs, false)) return;
+  if (u == 0)
+    p.remove(kUnplugKey);
+  else
+    p.putUInt(kUnplugKey, u);
+  p.end();
+}
+
+// 仅看充电脚，避免 loop 里反复 ADC
+static bool onPowerPins() {
+  const bool charging = digitalRead(PIN_CHRG) == LOW;
+  const bool full = digitalRead(PIN_STDBY) == HIGH;
+  return charging || full;
+}
+
+void batteryPoll() {
+  static int8_t last = -1;  // -1 未知，0 放电，1 接电
+  static uint32_t last_save_ms = 0;
+  const bool on = onPowerPins();
+  const time_t now = time(nullptr);
+  const bool time_ok = now >= 1700000000;
+
+  if (on) {
+    if (last != 1 && loadUnplugUnix() != 0) saveUnplugUnix(0);
+  } else if (time_ok) {
+    if (last == 1) {
+      saveUnplugUnix((uint32_t)now);
+      last_save_ms = millis();
+    } else if (loadUnplugUnix() == 0) {
+      // 节流：避免频繁开 NVS
+      if (last_save_ms == 0 || millis() - last_save_ms > 5000) {
+        saveUnplugUnix((uint32_t)now);
+        last_save_ms = millis();
+      }
+    }
+  }
+  last = on ? 1 : 0;
+}
+
+int32_t batteryUnpluggedSec() {
+  if (onPowerPins()) return 0;
+  const uint32_t u = loadUnplugUnix();
+  const time_t now = time(nullptr);
+  if (!u || now < 1700000000) return -1;
+  if ((uint32_t)now < u) return -1;
+  return (int32_t)((uint32_t)now - u);
 }
 
 static uint16_t readPackMv() {
