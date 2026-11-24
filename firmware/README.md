@@ -1,6 +1,6 @@
 # Carte 固件
 
-PlatformIO + Arduino。面向 **ZECTRIX NOTE4C** 四色墨水屏：多 App（待办 / 日历 / 天气 / 相册）+ **WiFi / Web 配网鉴权**（portal-go）。
+PlatformIO + Arduino。面向 **ZECTRIX NOTE4C** 四色墨水屏：多 App（待办 / 日历 / 天气 / 相册 / 状态 / 象棋 / 名言）+ **WiFi / Web 配网鉴权**（portal-go）+ 日程。
 
 完整说明：[固件功能](../docs/features/index.md) · [App 功能](../docs/features/apps.md)
 

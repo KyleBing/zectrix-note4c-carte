@@ -48,5 +48,5 @@ pio device monitor
 
 - 开机全刷状态页约 **16 秒**，属正常
 - **短按松开 BOOT**：再刷一页最新状态
-- **长按 DOWN ~3s**：关机（深睡）；再按下键唤醒开机
+- **长按 DOWN ~2s**：关机（深睡）；再按下键唤醒开机
 - 文档：https://kylebing.github.io/zectrix-note4c-carte/

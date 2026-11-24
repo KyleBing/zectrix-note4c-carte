@@ -27,7 +27,7 @@ hero:
 
 features:
   - title: 多 App + Web 配网
-    details: 待办日记、月历农历、和风 NOW/7D、四色相册；长按上键开配置站做配网与上传
+    details: 待办、日历、天气、相册、状态、象棋、名言；日程页管定时 / 静默 / 每日切 App；长按上键开配置站
   - title: 按键与可打断全刷
     details: UP/DOWN 切 App，BOOT 只做页内动作；四色全刷约 16 秒，刷屏中按键可立刻中断并切到目标页
   - title: 错误可追溯
