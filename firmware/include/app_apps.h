@@ -12,6 +12,7 @@ enum class AppId : uint8_t {
   Album,
   Status,
   Chess,
+  Quote,
   Count,
 };
 
@@ -40,6 +41,8 @@ inline const char *appIdName(AppId id) {
       return "STATUS";
     case AppId::Chess:
       return "CHESS";
+    case AppId::Quote:
+      return "QUOTE";
     default:
       return "?";
   }
@@ -59,6 +62,8 @@ inline const char *appIdLabelZh(AppId id) {
       return "状态";
     case AppId::Chess:
       return "象棋";
+    case AppId::Quote:
+      return "名言";
     default:
       return "?";
   }
@@ -77,7 +82,9 @@ inline const char *appIdHintZh(AppId id) {
     case AppId::Status:
       return "内存 / 定时刷新";
     case AppId::Chess:
-      return "国际象棋残局";
+      return "国际象棋练习";
+    case AppId::Quote:
+      return "名言警句";
     default:
       return "";
   }

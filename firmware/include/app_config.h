@@ -11,6 +11,21 @@ static constexpr int QW_HOST_MAX = 80;
 static constexpr int QW_KEY_MAX = 64;
 static constexpr int QW_LOC_ID_MAX = 16;
 static constexpr int QW_LOC_NAME_MAX = 48;
+static constexpr int QUIET_SLOT_MAX = 6;
+static constexpr int APP_SCHED_MAX = 12;
+
+// 静默时段：当天分钟 [start, end)；若 start>end 则跨午夜
+struct QuietSlot {
+  uint16_t start_min;
+  uint16_t end_min;
+};
+
+// 每日 App 切换点：到点切到 app_id；view 为界面（天气 0=实况 1=预报）
+struct AppSchedSlot {
+  uint16_t at_min;
+  uint8_t app_id;
+  uint8_t view;
+};
 
 struct WifiProfile {
   char ssid[33];
@@ -35,10 +50,14 @@ struct AppConfig {
   bool album_show_header; // 设备相册展示时是否叠标题栏；默认 true
   bool album_refresh_en;  // 相册定时翻页 / 关机定时醒；默认 false
   uint32_t album_refresh_sec; // 相册翻页间隔秒；开启时至少 60；默认 3600
+  bool album_random;      // 相册翻页乱序；默认 false
   bool week_start_monday; // 日历一周起始：true=周一，false=周日；默认 true
   int16_t tz_offset_min;  // 时区相对 UTC 分钟数；默认 480（UTC+8）
   uint16_t ntp_interval_days; // NTP 周期天数；默认 30（复位后仍会校一次）
   uint8_t apps_enabled;   // bit i = AppId i 是否启用；默认全开
+
+  // 待办：true=用本机正文（LittleFS），false=拉 Portal 日记
+  bool todo_use_local;
 
   // 天气：设备只存位置；和风 JWT/Key 在 Portal-go 服务端
   // host/key 字段保留兼容旧配置，设备端请求不再使用
@@ -49,6 +68,27 @@ struct AppConfig {
   char qweather_location_name[QW_LOC_NAME_MAX];
   bool weather_refresh_en;       // 天气定时刷新 / 关机定时醒；默认 false
   uint32_t weather_refresh_sec;  // 间隔秒；开启时至少 60；默认 3600
+
+  // 国际象棋练习
+  bool chess_random;             // false=顺序，true=乱序；默认 false
+  uint8_t chess_levels;          // CHESS_LV_* 多选；0 视为全开；默认全开
+  bool chess_refresh_en;         // 定时翻局 / 关机定时醒；默认 false
+  uint32_t chess_refresh_sec;    // 间隔秒；开启时至少 60；默认 3600
+
+  // 名言警句
+  bool quote_random;             // 翻条顺序；默认 false
+  bool quote_refresh_en;         // 定时翻条；默认 false
+  uint32_t quote_refresh_sec;    // 间隔秒；默认 3600
+
+  // 每日静默时段：期间不做定时刷新 / App 时间表切换 / RTC 醒刷
+  bool quiet_en;
+  uint8_t quiet_count;
+  QuietSlot quiet_slots[QUIET_SLOT_MAX];
+
+  // 每日 App 切换时间表
+  bool app_sched_en;
+  uint8_t app_sched_count;
+  AppSchedSlot app_sched[APP_SCHED_MAX];
 
   bool loaded;
 };
@@ -84,6 +124,20 @@ bool saveAlbumRefreshSec(uint32_t sec);
 uint32_t loadAlbumLastUnix();
 void saveAlbumLastUnix(uint32_t unix_sec);
 bool albumAutoRefreshDue();
+
+bool saveChessSettings(bool random_order, uint8_t levels, bool refresh_en, uint32_t refresh_sec);
+uint32_t loadChessLastUnix();
+void saveChessLastUnix(uint32_t unix_sec);
+bool chessAutoRefreshDue();
+
+bool saveQuoteSettings(bool random_order, bool refresh_en, uint32_t refresh_sec);
+uint32_t loadQuoteLastUnix();
+void saveQuoteLastUnix(uint32_t unix_sec);
+
+bool saveAlbumRandom(bool random_order);
+bool saveTodoUseLocal(bool use_local);
+bool saveQuietSchedule(bool en, const QuietSlot *slots, uint8_t count);
+bool saveAppSchedule(bool en, const AppSchedSlot *slots, uint8_t count);
 
 bool saveIdleOffSec(uint32_t sec);
 bool saveIdleOffOnPower(bool on);

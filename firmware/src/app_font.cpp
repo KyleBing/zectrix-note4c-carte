@@ -326,8 +326,11 @@ static void drawHzkSmall(EpdSsd2683 &epd, int x, int y, uint16_t gb, EpdColor fg
 }
 
 int fontDrawTextWrapped(EpdSsd2683 &epd, int x, int y, int max_w, int max_y, const char *utf8,
-                        EpdColor fg, EpdColor bg, int wrap_x, bool strike, EpdColor strike_color) {
+                        EpdColor fg, EpdColor bg, int wrap_x, bool strike, EpdColor strike_color,
+                        int line_gap) {
   if (!utf8) return y;
+  if (line_gap < 0) line_gap = 0;
+  const int step = kLineH + line_gap;
   const int origin_x = (wrap_x >= 0) ? wrap_x : x;
   const int right = origin_x + max_w;
   int cx = x;
@@ -348,7 +351,49 @@ int fontDrawTextWrapped(EpdSsd2683 &epd, int x, int y, int max_w, int max_y, con
     cx = origin_x;
     line_start_x = origin_x;
     line_has_glyph = false;
-    cy += kLineH;
+    cy += step;
+  };
+
+  auto isWordChar = [](unsigned char c) -> bool {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '\'' ||
+           c == '-';
+  };
+  auto isTrailPunct = [](unsigned char c) -> bool {
+    switch (c) {
+      case ',':
+      case '.':
+      case ';':
+      case ':':
+      case '!':
+      case '?':
+      case ')':
+      case ']':
+      case '}':
+      case '%':
+      case '\'':
+      case '"':
+        return true;
+      default:
+        return false;
+    }
+  };
+  // ASCII 词宽（含尾随标点），整词换行、标点不落行首
+  auto asciiWordWidth = [&](const char *s) -> int {
+    int w = 0;
+    const int aw = g_ready ? 8 : 6;
+    while (*s) {
+      const unsigned char c = (unsigned char)*s;
+      if (c >= 0x80 || !isWordChar(c)) break;
+      w += aw;
+      s++;
+    }
+    while (*s) {
+      const unsigned char c = (unsigned char)*s;
+      if (c >= 0x80 || !isTrailPunct(c)) break;
+      w += aw;
+      s++;
+    }
+    return w;
   };
 
   int glyphs = 0;
@@ -364,12 +409,33 @@ int fontDrawTextWrapped(EpdSsd2683 &epd, int x, int y, int max_w, int max_y, con
       continue;
     }
 
+    // 英文单词（含 , . 等）：行内放不下则先换行（单词本身超宽仍会逐字画）
+    {
+      const unsigned char c0 = (unsigned char)*p;
+      if (c0 < 0x80 && isWordChar(c0)) {
+        const int ww = asciiWordWidth(p);
+        if (ww > 0 && cx + ww > right && cx > origin_x) {
+          newline();
+          if (cy + kLineH > max_y) break;
+        }
+      } else if (c0 < 0x80 && isTrailPunct(c0) && cx > origin_x) {
+        // 孤立标点尽量留在当前行（宽不足时仍换行，避免死循环）
+        const int aw = g_ready ? 8 : 6;
+        if (cx + aw > right) {
+          // 标点单独超宽极少见：挤在当前行继续画
+        }
+      }
+    }
+
     uint32_t cp = 0;
     utf8Next(p, cp);
     const int w = glyphWidth(cp);
     if (cx + w > right && cx > origin_x) {
-      newline();
-      if (cy + kLineH > max_y) break;
+      // 行首禁则：标点不换到下一行开头，宁可略超出
+      if (!(cp < 0x80 && isTrailPunct((unsigned char)cp))) {
+        newline();
+        if (cy + kLineH > max_y) break;
+      }
     }
 
     drew = true;
@@ -528,10 +594,12 @@ int fontDrawTextWrappedSmall(EpdSsd2683 &epd, int x, int y, int max_w, int max_y
 }
 
 int fontDrawTextWrappedDouble(EpdSsd2683 &epd, int x, int y, int max_w, int max_y, const char *utf8,
-                              EpdColor fg, EpdColor bg, int wrap_x) {
+                              EpdColor fg, EpdColor bg, int wrap_x, int line_gap) {
   if (!utf8) return y;
   constexpr int kScale = 2;
   const int line_h = kLineH * kScale;
+  if (line_gap < 0) line_gap = 0;
+  const int step = line_h + line_gap;
   const int origin_x = (wrap_x >= 0) ? wrap_x : x;
   const int right = origin_x + max_w;
   int cx = x;
@@ -541,7 +609,49 @@ int fontDrawTextWrappedDouble(EpdSsd2683 &epd, int x, int y, int max_w, int max_
 
   auto newline = [&]() {
     cx = origin_x;
-    cy += line_h;
+    cy += step;
+  };
+
+  auto isWordChar = [](unsigned char c) -> bool {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '\'' ||
+           c == '-';
+  };
+  auto isTrailPunct = [](unsigned char c) -> bool {
+    switch (c) {
+      case ',':
+      case '.':
+      case ';':
+      case ':':
+      case '!':
+      case '?':
+      case ')':
+      case ']':
+      case '}':
+      case '%':
+      case '\'':
+      case '"':
+        return true;
+      default:
+        return false;
+    }
+  };
+  // 2× ASCII 词宽（含尾随标点）
+  auto asciiWordWidth = [&](const char *s) -> int {
+    int w = 0;
+    const int aw = (g_ready ? 8 : 6) * kScale;
+    while (*s) {
+      const unsigned char c = (unsigned char)*s;
+      if (c >= 0x80 || !isWordChar(c)) break;
+      w += aw;
+      s++;
+    }
+    while (*s) {
+      const unsigned char c = (unsigned char)*s;
+      if (c >= 0x80 || !isTrailPunct(c)) break;
+      w += aw;
+      s++;
+    }
+    return w;
   };
 
   int glyphs = 0;
@@ -557,12 +667,26 @@ int fontDrawTextWrappedDouble(EpdSsd2683 &epd, int x, int y, int max_w, int max_
       continue;
     }
 
+    // 英文整词换行，标点跟词走
+    {
+      const unsigned char c0 = (unsigned char)*p;
+      if (c0 < 0x80 && isWordChar(c0)) {
+        const int ww = asciiWordWidth(p);
+        if (ww > 0 && cx + ww > right && cx > origin_x) {
+          newline();
+          if (cy + line_h > max_y) break;
+        }
+      }
+    }
+
     uint32_t cp = 0;
     utf8Next(p, cp);
     const int w = glyphWidth(cp) * kScale;
     if (cx + w > right && cx > origin_x) {
-      newline();
-      if (cy + line_h > max_y) break;
+      if (!(cp < 0x80 && isTrailPunct((unsigned char)cp))) {
+        newline();
+        if (cy + line_h > max_y) break;
+      }
     }
 
     drew = true;

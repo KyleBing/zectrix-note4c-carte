@@ -1,5 +1,6 @@
 #include "app_config.h"
 #include "app_apps.h"
+#include "app_chess.h"
 
 #include <Preferences.h>
 #include <ArduinoJson.h>
@@ -16,11 +17,24 @@ static void clearConfig() {
   g_cfg.album_show_header = true;
   g_cfg.album_refresh_en = false;
   g_cfg.album_refresh_sec = 3600;
+  g_cfg.album_random = false;
   g_cfg.week_start_monday = true;
   g_cfg.tz_offset_min = 480;  // UTC+8
   g_cfg.ntp_interval_days = 30;
+  g_cfg.todo_use_local = false;
   g_cfg.weather_refresh_en = false;
   g_cfg.weather_refresh_sec = 3600;
+  g_cfg.chess_random = false;
+  g_cfg.chess_levels = CHESS_LV_ALL;
+  g_cfg.chess_refresh_en = false;
+  g_cfg.chess_refresh_sec = 3600;
+  g_cfg.quote_random = false;
+  g_cfg.quote_refresh_en = false;
+  g_cfg.quote_refresh_sec = 3600;
+  g_cfg.quiet_en = false;
+  g_cfg.quiet_count = 0;
+  g_cfg.app_sched_en = false;
+  g_cfg.app_sched_count = 0;
   g_cfg.apps_enabled = appsEnabledDefaultMask();
 }
 
@@ -397,6 +411,103 @@ bool albumAutoRefreshDue() {
   return (uint32_t)now >= last + iv;
 }
 
+bool saveChessSettings(bool random_order, uint8_t levels, bool refresh_en, uint32_t refresh_sec) {
+  g_cfg.chess_random = random_order;
+  g_cfg.chess_levels = levels ? levels : CHESS_LV_ALL;
+  g_cfg.chess_refresh_en = refresh_en;
+  g_cfg.chess_refresh_sec = clampRefreshSec(refresh_sec == 0 ? kRefreshDefaultSec : refresh_sec);
+  if (refresh_en && g_cfg.chess_refresh_sec < kRefreshMinSec) {
+    g_cfg.chess_refresh_sec = kRefreshDefaultSec;
+  }
+  return saveAppConfig();
+}
+
+uint32_t loadChessLastUnix() {
+  if (!g_prefs.isKey("ch_last")) return 0;
+  return g_prefs.getUInt("ch_last", 0);
+}
+
+void saveChessLastUnix(uint32_t unix_sec) { g_prefs.putUInt("ch_last", unix_sec); }
+
+bool chessAutoRefreshDue() {
+  if (!g_cfg.chess_refresh_en) return false;
+  const uint32_t iv = g_cfg.chess_refresh_sec;
+  if (iv < kRefreshMinSec) return false;
+  if (!appIdEnabled(AppId::Chess)) return false;
+  const time_t now = time(nullptr);
+  if (now < 1700000000) return false;
+  const uint32_t last = loadChessLastUnix();
+  if (last == 0) return false;
+  return (uint32_t)now >= last + iv;
+}
+
+bool saveQuoteSettings(bool random_order, bool refresh_en, uint32_t refresh_sec) {
+  g_cfg.quote_random = random_order;
+  g_cfg.quote_refresh_en = refresh_en;
+  g_cfg.quote_refresh_sec = clampRefreshSec(refresh_sec == 0 ? kRefreshDefaultSec : refresh_sec);
+  if (refresh_en && g_cfg.quote_refresh_sec < kRefreshMinSec) {
+    g_cfg.quote_refresh_sec = kRefreshDefaultSec;
+  }
+  return saveAppConfig();
+}
+
+uint32_t loadQuoteLastUnix() {
+  if (!g_prefs.isKey("qt_last")) return 0;
+  return g_prefs.getUInt("qt_last", 0);
+}
+
+void saveQuoteLastUnix(uint32_t unix_sec) { g_prefs.putUInt("qt_last", unix_sec); }
+
+bool saveAlbumRandom(bool random_order) {
+  g_cfg.album_random = random_order;
+  return saveAppConfig();
+}
+
+bool saveTodoUseLocal(bool use_local) {
+  g_cfg.todo_use_local = use_local;
+  return saveAppConfig();
+}
+
+bool saveQuietSchedule(bool en, const QuietSlot *slots, uint8_t count) {
+  g_cfg.quiet_en = en;
+  g_cfg.quiet_count = 0;
+  memset(g_cfg.quiet_slots, 0, sizeof(g_cfg.quiet_slots));
+  if (slots && count) {
+    if (count > QUIET_SLOT_MAX) count = QUIET_SLOT_MAX;
+    for (uint8_t i = 0; i < count; i++) {
+      if (slots[i].start_min > 1439 || slots[i].end_min > 1439) continue;
+      if (slots[i].start_min == slots[i].end_min) continue;
+      g_cfg.quiet_slots[g_cfg.quiet_count++] = slots[i];
+    }
+  }
+  return saveAppConfig();
+}
+
+bool saveAppSchedule(bool en, const AppSchedSlot *slots, uint8_t count) {
+  g_cfg.app_sched_en = en;
+  g_cfg.app_sched_count = 0;
+  memset(g_cfg.app_sched, 0, sizeof(g_cfg.app_sched));
+  if (slots && count) {
+    if (count > APP_SCHED_MAX) count = APP_SCHED_MAX;
+    for (uint8_t i = 0; i < count; i++) {
+      if (slots[i].at_min > 1439) continue;
+      if (slots[i].app_id >= static_cast<uint8_t>(AppId::Count)) continue;
+      g_cfg.app_sched[g_cfg.app_sched_count++] = slots[i];
+    }
+  }
+  // 按 at_min 升序，方便时间表展示与解析
+  for (uint8_t i = 0; i + 1 < g_cfg.app_sched_count; i++) {
+    for (uint8_t j = i + 1; j < g_cfg.app_sched_count; j++) {
+      if (g_cfg.app_sched[j].at_min < g_cfg.app_sched[i].at_min) {
+        const AppSchedSlot tmp = g_cfg.app_sched[i];
+        g_cfg.app_sched[i] = g_cfg.app_sched[j];
+        g_cfg.app_sched[j] = tmp;
+      }
+    }
+  }
+  return saveAppConfig();
+}
+
 String appConfigToJson(bool mask_secrets) {
   JsonDocument doc;
   JsonArray wifis = doc["wifis"].to<JsonArray>();
@@ -441,11 +552,36 @@ String appConfigToJson(bool mask_secrets) {
   doc["album_show_header"] = g_cfg.album_show_header;
   doc["album_refresh_en"] = g_cfg.album_refresh_en;
   doc["album_refresh_sec"] = g_cfg.album_refresh_sec;
+  doc["album_random"] = g_cfg.album_random;
+  doc["todo_use_local"] = g_cfg.todo_use_local;
+  doc["chess_random"] = g_cfg.chess_random;
+  doc["chess_levels"] = g_cfg.chess_levels;
+  doc["chess_refresh_en"] = g_cfg.chess_refresh_en;
+  doc["chess_refresh_sec"] = g_cfg.chess_refresh_sec;
+  doc["quote_random"] = g_cfg.quote_random;
+  doc["quote_refresh_en"] = g_cfg.quote_refresh_en;
+  doc["quote_refresh_sec"] = g_cfg.quote_refresh_sec;
   doc["week_start_monday"] = g_cfg.week_start_monday;
   doc["tz_offset_min"] = g_cfg.tz_offset_min;
   doc["ntp_interval_days"] = g_cfg.ntp_interval_days;
   doc["apps_enabled"] = g_cfg.apps_enabled;
-  doc["apps_mask_ver"] = 2;  // 与 Status/Chess 引入对应；升级时默认打开新 App
+  doc["apps_mask_ver"] = 3;  // Quote 引入；升级时默认打开新 App
+
+  doc["quiet_en"] = g_cfg.quiet_en;
+  JsonArray quiet = doc["quiet"].to<JsonArray>();
+  for (uint8_t i = 0; i < g_cfg.quiet_count; i++) {
+    JsonObject q = quiet.add<JsonObject>();
+    q["start"] = g_cfg.quiet_slots[i].start_min;
+    q["end"] = g_cfg.quiet_slots[i].end_min;
+  }
+  doc["app_sched_en"] = g_cfg.app_sched_en;
+  JsonArray sched = doc["app_sched"].to<JsonArray>();
+  for (uint8_t i = 0; i < g_cfg.app_sched_count; i++) {
+    JsonObject s = sched.add<JsonObject>();
+    s["at"] = g_cfg.app_sched[i].at_min;
+    s["app"] = g_cfg.app_sched[i].app_id;
+    s["view"] = g_cfg.app_sched[i].view;
+  }
 
   String out;
   serializeJsonPretty(doc, out);
@@ -553,6 +689,72 @@ bool appConfigFromJson(const char *json) {
   } else {
     g_cfg.album_refresh_sec = kRefreshDefaultSec;
   }
+  g_cfg.album_random = doc["album_random"] | false;
+  g_cfg.todo_use_local = doc["todo_use_local"] | false;
+  if (doc["chess_random"].is<bool>()) {
+    g_cfg.chess_random = doc["chess_random"].as<bool>();
+  } else {
+    g_cfg.chess_random = false;
+  }
+  if (doc["chess_levels"].is<int>()) {
+    g_cfg.chess_levels = (uint8_t)doc["chess_levels"].as<int>() & CHESS_LV_ALL;
+    if (g_cfg.chess_levels == 0) g_cfg.chess_levels = CHESS_LV_ALL;
+  } else {
+    g_cfg.chess_levels = CHESS_LV_ALL;
+  }
+  if (doc["chess_refresh_en"].is<bool>()) {
+    g_cfg.chess_refresh_en = doc["chess_refresh_en"].as<bool>();
+  } else {
+    g_cfg.chess_refresh_en = false;
+  }
+  if (doc["chess_refresh_sec"].is<uint32_t>() || doc["chess_refresh_sec"].is<int>()) {
+    uint32_t sec = (uint32_t)(doc["chess_refresh_sec"] | 0);
+    g_cfg.chess_refresh_sec = clampRefreshSec(sec == 0 ? kRefreshDefaultSec : sec);
+  } else {
+    g_cfg.chess_refresh_sec = kRefreshDefaultSec;
+  }
+  g_cfg.quote_random = doc["quote_random"] | false;
+  g_cfg.quote_refresh_en = doc["quote_refresh_en"] | false;
+  if (doc["quote_refresh_sec"].is<uint32_t>() || doc["quote_refresh_sec"].is<int>()) {
+    uint32_t sec = (uint32_t)(doc["quote_refresh_sec"] | 0);
+    g_cfg.quote_refresh_sec = clampRefreshSec(sec == 0 ? kRefreshDefaultSec : sec);
+  } else {
+    g_cfg.quote_refresh_sec = kRefreshDefaultSec;
+  }
+
+  g_cfg.quiet_en = doc["quiet_en"] | false;
+  g_cfg.quiet_count = 0;
+  memset(g_cfg.quiet_slots, 0, sizeof(g_cfg.quiet_slots));
+  if (doc["quiet"].is<JsonArray>()) {
+    for (JsonObject q : doc["quiet"].as<JsonArray>()) {
+      if (g_cfg.quiet_count >= QUIET_SLOT_MAX) break;
+      const int st = q["start"] | -1;
+      const int en = q["end"] | -1;
+      if (st < 0 || en < 0 || st > 1439 || en > 1439 || st == en) continue;
+      g_cfg.quiet_slots[g_cfg.quiet_count].start_min = (uint16_t)st;
+      g_cfg.quiet_slots[g_cfg.quiet_count].end_min = (uint16_t)en;
+      g_cfg.quiet_count++;
+    }
+  }
+
+  g_cfg.app_sched_en = doc["app_sched_en"] | false;
+  g_cfg.app_sched_count = 0;
+  memset(g_cfg.app_sched, 0, sizeof(g_cfg.app_sched));
+  if (doc["app_sched"].is<JsonArray>()) {
+    for (JsonObject s : doc["app_sched"].as<JsonArray>()) {
+      if (g_cfg.app_sched_count >= APP_SCHED_MAX) break;
+      const int at = s["at"] | -1;
+      const int app = s["app"] | -1;
+      const int view = s["view"] | 0;
+      if (at < 0 || at > 1439) continue;
+      if (app < 0 || app >= static_cast<int>(AppId::Count)) continue;
+      g_cfg.app_sched[g_cfg.app_sched_count].at_min = (uint16_t)at;
+      g_cfg.app_sched[g_cfg.app_sched_count].app_id = (uint8_t)app;
+      g_cfg.app_sched[g_cfg.app_sched_count].view = (uint8_t)(view < 0 ? 0 : view);
+      g_cfg.app_sched_count++;
+    }
+  }
+
   if (doc["week_start_monday"].is<bool>()) {
     g_cfg.week_start_monday = doc["week_start_monday"].as<bool>();
   } else {
@@ -572,12 +774,16 @@ bool appConfigFromJson(const char *json) {
   if (doc["apps_enabled"].is<int>()) {
     g_cfg.apps_enabled = (uint8_t)doc["apps_enabled"].as<int>() & appsEnabledDefaultMask();
     if (g_cfg.apps_enabled == 0) g_cfg.apps_enabled = appsEnabledDefaultMask();
-    // 旧配置无 apps_mask_ver：把新增 App（状态/象棋）默认打开一次
+    // 旧配置无 apps_mask_ver：把新增 App 默认打开一次
     const int ver = doc["apps_mask_ver"].is<int>() ? doc["apps_mask_ver"].as<int>() : 0;
     if (ver < 2) {
       constexpr uint8_t kNewApps =
           (1u << static_cast<int>(AppId::Status)) | (1u << static_cast<int>(AppId::Chess));
       g_cfg.apps_enabled = (uint8_t)(g_cfg.apps_enabled | kNewApps);
+    }
+    if (ver < 3) {
+      g_cfg.apps_enabled =
+          (uint8_t)(g_cfg.apps_enabled | (1u << static_cast<int>(AppId::Quote)));
     }
   } else {
     g_cfg.apps_enabled = appsEnabledDefaultMask();

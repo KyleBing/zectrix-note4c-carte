@@ -6,6 +6,7 @@
 #include "app_theme.h"
 #include "app_footer.h"
 #include "app_version.h"
+#include "app_led.h"
 
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
@@ -54,9 +55,11 @@ bool diaryLogin(const char *email, const char *password, String &err) {
   String payload;
   serializeJson(body, payload);
 
+  ledSet(LedPattern::BlinkFast);  // HTTP 请求中快闪
   WiFiClientSecure client;
   HTTPClient http;
   if (!beginHttp(http, client, url)) {
+    ledOff();
     err = "http begin failed";
     return false;
   }
@@ -68,6 +71,7 @@ bool diaryLogin(const char *email, const char *password, String &err) {
   const String resp = http.getString();
   captureRenewedToken(http);
   http.end();
+  ledOff();
 
   if (code <= 0) {
     err = String("HTTP error ") + code;
@@ -109,9 +113,11 @@ bool diaryFetchById(const char *diary_id, DiaryDetail &out) {
   String url = joinUrl(cfg.portal_base_url, "/diary/detail?diaryId=");
   url += id;
 
+  ledSet(LedPattern::BlinkFast);  // 拉日记 / 待办时快闪
   WiFiClientSecure client;
   HTTPClient http;
   if (!beginHttp(http, client, url)) {
+    ledOff();
     out.message = "http begin failed";
     return false;
   }
@@ -123,6 +129,7 @@ bool diaryFetchById(const char *diary_id, DiaryDetail &out) {
   const String resp = http.getString();
   captureRenewedToken(http);
   http.end();
+  // 保持图案至刷屏结束由 finishAction 收尾；失败路径也由上层 ErrorBurst
 
   if (code <= 0) {
     out.message = String("HTTP error ") + code;

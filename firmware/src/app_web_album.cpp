@@ -179,6 +179,9 @@ void webAlbumAppendPage(String &b) {
            "<label class=ed-sw><input type=checkbox name=refresh_en value=1");
     if (ac.album_refresh_en) b += F(" checked");
     b += F("><span>定时翻页</span></label>"
+           "<label class=ed-sw><input type=checkbox name=album_random value=1");
+    if (ac.album_random) b += F(" checked");
+    b += F("><span>乱序</span></label>"
            "<span class=ed-dhm>"
            "<label><input name=refresh_d type=number min=0 max=365 step=1 value=");
     b += String(d);
@@ -1983,6 +1986,7 @@ static void handleAlbumSchedule() {
   const uint32_t sec = weatherRefreshSecFromDhm(d, h, m);
   saveAlbumRefreshSec(sec);
   saveAlbumRefreshEn(en);
+  saveAlbumRandom(g_srv->hasArg("album_random"));
   g_srv->send(200, "text/plain", "ok");
 }
 

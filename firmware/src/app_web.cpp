@@ -1,6 +1,10 @@
 #include "app_web.h"
 #include "app_config.h"
 #include "app_apps.h"
+#include "app_chess.h"
+#include "app_quote.h"
+#include "app_schedule.h"
+#include "app_todo_store.h"
 #include "app_wifi.h"
 #include "app_diary.h"
 #include "app_todo.h"
@@ -21,13 +25,27 @@
 #include <esp_system.h>
 #include <cstdio>
 #include <cstring>
+#include <new>
 
 static WebServer g_server(80);
 static bool g_running = false;
 static bool g_ap = false;
 static char g_url[40] = "";
 
-enum class NavTab : uint8_t { Status, Settings, Help, Wifi, Auth, Todo, Weather, Album, Errors };
+enum class NavTab : uint8_t {
+  Status,
+  Settings,
+  Help,
+  Wifi,
+  Auth,
+  Todo,
+  Weather,
+  Album,
+  Chess,
+  Quote,
+  Schedule,
+  Errors
+};
 
 static const char *kCss = R"CSS(
 *{box-sizing:border-box}
@@ -40,6 +58,7 @@ header nav{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0;flex:
 header nav a{display:inline-block;padding:5px 12px;border-radius:999px;font-size:13px;line-height:1.2;color:rgba(255,255,255,.55);text-decoration:none;border:1px solid transparent;background:transparent;transition:background .15s,color .15s,border-color .15s}
 header nav a:hover{color:#fff;background:rgba(255,255,255,.08)}
 header nav a.active{background:#ffcc00;color:#111;border-color:#ffcc00;font-weight:650}
+header nav .nav-sep{width:1px;height:14px;margin:0 6px;background:rgba(255,255,255,.22);flex-shrink:0;align-self:center}
 header .meta{margin:0 0 0 auto;padding:0;display:inline-flex;align-items:center;align-self:center;gap:10px;flex-shrink:0;line-height:1;height:28px;min-height:28px;color:inherit}
 header .meta .ver{font-size:12px;color:rgba(255,255,255,.55);font-variant-numeric:tabular-nums;letter-spacing:.02em;white-space:nowrap;line-height:1;height:28px;display:inline-flex;align-items:center}
 header .gh{display:inline-flex;align-items:center;justify-content:center;color:rgba(255,255,255,.7);line-height:0;width:28px;height:28px;flex-shrink:0}
@@ -117,6 +136,7 @@ pre{white-space:pre-wrap;background:#f7f7f5;padding:12px;border-radius:8px;font-
 .check-row.on span,.check-row:has(input:checked) span{color:#0a7a4b}
 body.page-album{overflow-x:auto;overflow-y:auto;min-height:100vh;background:#e8e6e0}
 body.page-album main{max-width:none;width:100%;margin:0;padding:0;display:block}
+body.page-quote main{max-width:1100px}
 .ed-shell{display:flex;flex-direction:column;min-width:0;background:#fff}
 .ed-work{display:flex;flex-direction:column;height:auto;overflow:visible;border-bottom:1px solid #d0cec8}
 .ed-toolbar{display:flex;flex-wrap:nowrap;gap:8px;align-items:center;background:#fff;border-bottom:1px solid #d0cec8;padding:6px 10px;flex:0 0 auto;overflow-x:auto}
@@ -312,7 +332,7 @@ body.page-album main{max-width:none;width:100%;margin:0;padding:0;display:block}
 .led-list{list-style:none;padding:0;margin:0}
 .led-list li{display:grid;grid-template-columns:44px 1fr;gap:12px;align-items:center;padding:14px 0;border-bottom:1px solid #f0f0f0}
 .led-list li:last-child{border-bottom:0}
-.led-dot-wrap{width:44px;height:44px;border-radius:12px;background:#111;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.led-dot-wrap{width:44px;height:44px;border-radius:0;background:#111;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .led-dot{width:14px;height:14px;border-radius:50%;background:#1a3d1a;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
 .led-dot.on{background:#3dff7a;box-shadow:0 0 10px rgba(61,255,122,.55),0 0 2px #3dff7a}
 .led-dot.off{background:#1a3d1a;box-shadow:none}
@@ -341,6 +361,42 @@ body.page-album main{max-width:none;width:100%;margin:0;padding:0;display:block}
 .err-src{display:inline-block;padding:2px 8px;border-radius:999px;background:#fdecec;color:#8b2010;font-size:12px;font-weight:650}
 .err-when{font-size:12px;color:#888;font-variant-numeric:tabular-nums}
 .err-msg{margin:0;white-space:pre-wrap;background:#faf7f5;border:1px solid #f0e6e4;padding:10px 12px;border-radius:8px;font-size:13px;color:#1a1a1a;line-height:1.4}
+.sched-day{position:relative;height:36px;margin:10px 0 18px;background:#eceae4;border-radius:6px}
+.sched-day .q{position:absolute;top:0;bottom:0;background:rgba(139,32,16,.28);border-radius:0}
+.sched-day .m{position:absolute;top:2px;bottom:2px;width:3px;background:#1a1a1a;border-radius:1px}
+.sched-day .lab{position:absolute;left:0;right:0;top:calc(100% + 2px);display:flex;justify-content:space-between;font-size:10px;color:#888}
+.sched-row{display:grid;grid-template-columns:1fr 1fr 1.2fr .9fr auto;gap:8px;align-items:end;margin:0 0 10px}
+.sched-row.quiet{grid-template-columns:1fr 1fr auto}
+.sched-row label{margin:0}
+.quote-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin:0 0 14px}
+.quote-toolbar .meta{margin:0}
+.quote-toolbar .btn-row{margin:0}
+.quote-layout{display:grid;grid-template-columns:minmax(200px,280px) 1fr;gap:0;border:1px solid #e8e8e8;border-radius:12px;overflow:hidden;min-height:440px;background:#fff}
+@media(max-width:720px){.quote-layout{grid-template-columns:1fr;min-height:0}}
+.quote-side{border-right:1px solid #e8e8e8;display:flex;flex-direction:column;min-height:0;background:#fafafa}
+@media(max-width:720px){.quote-side{border-right:0;border-bottom:1px solid #e8e8e8;max-height:240px}}
+.quote-side-h{padding:10px 12px;border-bottom:1px solid #e8e8e8;font-size:12px;color:#888;font-weight:650;letter-spacing:.02em}
+.quote-list{list-style:none;margin:0;padding:0;overflow:auto;flex:1;max-height:560px}
+.quote-list button{display:block;width:100%;text-align:left;border:0;border-radius:0;border-bottom:1px solid #eee;background:transparent;color:#1a1a1a;padding:12px 14px;cursor:pointer;font:inherit}
+.quote-list button:hover{background:#f0eee8}
+.quote-list button.on{background:#1a1a1a;color:#fff}
+.quote-list .q-i{font-size:11px;opacity:.55;font-variant-numeric:tabular-nums}
+.quote-list button.on .q-i{opacity:.85;color:#ffcc00}
+.quote-list .q-t{display:block;margin-top:4px;font-size:13px;font-weight:650;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.quote-list .q-a{display:block;margin-top:3px;font-size:11px;opacity:.65;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.quote-list button.on .q-a{opacity:.8}
+.quote-editor{padding:16px 18px;display:flex;flex-direction:column;min-width:0}
+.quote-editor .q-ed-title{margin:0 0 2px;font-size:14px;font-weight:650}
+.quote-editor .q-ed-hint{margin:0 0 12px;font-size:12px;color:#888}
+.quote-editor label{margin-top:10px}
+.quote-editor textarea{min-height:180px;resize:vertical;line-height:1.55;font-size:15px}
+.quote-editor .q-ed-empty{display:none;margin:28px 0;text-align:center;color:#888;font-size:13px;line-height:1.5}
+.quote-editor.is-empty .q-ed-form{display:none}
+.quote-editor.is-empty .q-ed-empty{display:block}
+.quote-editor.is-empty .q-ed-actions .q-del{display:none}
+.hint.sm{font-size:12px;color:#888;margin:6px 0 0;line-height:1.4}
+textarea.todo-src{min-height:220px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:1.45}
+#device-meters .meter-loading{margin:0;font-size:13px;color:#888}
 )CSS";
 
 static String htmlEscapeAttr(const char *s) {
@@ -356,6 +412,53 @@ static String htmlEscapeAttr(const char *s) {
   return out;
 }
 
+// HTML 正文转义（非属性）
+static void appendHtmlText(String &out, const String &s) {
+  for (size_t i = 0; i < s.length(); i++) {
+    const char c = s[i];
+    if (c == '&') out += F("&amp;");
+    else if (c == '<') out += F("&lt;");
+    else if (c == '>') out += F("&gt;");
+    else out += c;
+  }
+}
+
+// JS 字符串字面量内容转义（不含外层引号）
+static void appendJsStringContent(String &out, const String &s) {
+  for (size_t i = 0; i < s.length(); i++) {
+    const unsigned char c = (unsigned char)s[i];
+    if (c == '\\' || c == '"' || c == '\'') {
+      out += '\\';
+      out += (char)c;
+    } else if (c == '\n') {
+      out += F("\\n");
+    } else if (c == '\r') {
+      out += F("\\r");
+    } else if (c == '\t') {
+      out += F("\\t");
+    } else if (c < 0x20) {
+      char buf[7];
+      snprintf(buf, sizeof(buf), "\\u%04x", c);
+      out += buf;
+    } else {
+      out += (char)c;
+    }
+  }
+}
+
+// 列表预览：取首行并截断
+static String quotePreviewLine(const String &text, size_t max_chars = 36) {
+  String line = text;
+  const int nl = line.indexOf('\n');
+  if (nl >= 0) line.remove(nl);
+  line.trim();
+  if (line.length() > max_chars) {
+    line.remove(max_chars);
+    line += F("…");
+  }
+  return line;
+}
+
 static void appendNavLink(String &page, NavTab tab, NavTab active, const char *href, const char *label) {
   page += F("<a href=");
   page += href;
@@ -364,6 +467,8 @@ static void appendNavLink(String &page, NavTab tab, NavTab active, const char *h
   page += label;
   page += F("</a>");
 }
+
+static void appendNavSep(String &page) { page += F("<span class=nav-sep aria-hidden=true></span>"); }
 
 static void redirectOk(const char *path, const char *code) {
   String loc = String(path);
@@ -393,6 +498,18 @@ static void appendFlashFromQuery(String &b) {
   else if (code == "todo") msg = "待办已拉取";
   else if (code == "weather") msg = "天气开关已保存";
   else if (code == "pick") msg = "已选用位置";
+  else if (code == "chess") msg = "象棋练习设置已保存";
+  else if (code == "quote") msg = "名言设置已保存";
+  else if (code == "quote_list") msg = "名言列表已保存";
+  else if (code == "quote_one") msg = "名言已保存";
+  else if (code == "quote_add") msg = "已添加名言";
+  else if (code == "quote_del") msg = "已删除名言";
+  else if (code == "quote_reset") msg = "已恢复内置名言与诗词";
+  else if (code == "todo_local") msg = "本机待办已保存";
+  else if (code == "todo_mode") msg = "待办数据源已切换";
+  else if (code == "quiet") msg = "静默时段已保存";
+  else if (code == "appsched") msg = "App 时间表已保存";
+  else if (code == "refresh_all") msg = "定时刷新设置已保存";
   else if (code == "saved") msg = "已保存";
   else if (code == "err_cleared") msg = "错误记录已清空";
   if (!msg) return;
@@ -415,6 +532,7 @@ static void sendHtml(NavTab active, const String &body, SendHtmlExtraFn extra = 
   g_server.sendContent(kCss, strlen(kCss));
   g_server.sendContent(F("</style></head><body"));
   if (active == NavTab::Album) g_server.sendContent(F(" class=page-album"));
+  else if (active == NavTab::Quote) g_server.sendContent(F(" class=page-quote"));
 
   {
     String nav;
@@ -423,13 +541,21 @@ static void sendHtml(NavTab active, const String &body, SendHtmlExtraFn extra = 
              "<div class=brand>"
              "<img class=site-logo src=/favicon.svg alt='' width=28 height=28>"
              "<h1>Carte</h1></div><nav>");
+    // 系统：状态 / 设置 / WiFi / 鉴权
     appendNavLink(nav, NavTab::Status, active, "/", "状态");
     appendNavLink(nav, NavTab::Settings, active, "/settings", "设置");
     appendNavLink(nav, NavTab::Wifi, active, "/wifi", "WiFi");
     appendNavLink(nav, NavTab::Auth, active, "/auth", "鉴权");
+    appendNavSep(nav);
+    // App：待办 / 天气 / 相册 / 象棋
     appendNavLink(nav, NavTab::Todo, active, "/todo", "待办");
     appendNavLink(nav, NavTab::Weather, active, "/weather", "天气");
     appendNavLink(nav, NavTab::Album, active, "/album", "相册");
+    appendNavLink(nav, NavTab::Chess, active, "/chess", "象棋");
+    appendNavLink(nav, NavTab::Quote, active, "/quote", "名言");
+    appendNavSep(nav);
+    // 其它：日程 / 错误 / 帮助
+    appendNavLink(nav, NavTab::Schedule, active, "/schedule", "日程");
     appendNavLink(nav, NavTab::Errors, active, "/errors", "错误");
     appendNavLink(nav, NavTab::Help, active, "/help", "帮助");
     nav += F("</nav><div class=meta><span class=ver>");
@@ -458,130 +584,102 @@ static void kvRow(String &b, const char *k, const String &v) {
   b += F("</dd>");
 }
 
-static void fmtBytes(char *buf, size_t n, uint64_t bytes) {
-  if (bytes >= (1024ull * 1024ull)) {
-    snprintf(buf, n, "%.2f MB", bytes / (1024.0 * 1024.0));
-  } else if (bytes >= 1024ull) {
-    snprintf(buf, n, "%.1f KB", bytes / 1024.0);
-  } else {
-    snprintf(buf, n, "%u B", (unsigned)bytes);
-  }
-}
-
-static const char *meterTone(int pct) {
-  if (pct >= 90) return "bad";
-  if (pct >= 75) return "warn";
-  return "ok";
-}
-
-// used/total 进度条；pct_override < 0 时按 used/total 计算
-static void appendMeter(String &b, const char *label, uint64_t used, uint64_t total,
-                        const char *extra, int pct_override = -1) {
-  int pct = 0;
-  if (pct_override >= 0) {
-    pct = pct_override;
-  } else if (total > 0) {
-    pct = (int)((used * 100ull) / total);
-    if (pct > 100) pct = 100;
-  }
-  char u[24], t[24], val[96];
-  fmtBytes(u, sizeof(u), used);
-  fmtBytes(t, sizeof(t), total);
-  if (extra && extra[0]) {
-    snprintf(val, sizeof(val), "%s / %s · %d%% · %s", u, t, pct, extra);
-  } else {
-    snprintf(val, sizeof(val), "%s / %s · %d%%", u, t, pct);
-  }
-  b += F("<div class=meter><div class=meter-h><span class=lab>");
-  b += label;
-  b += F("</span><span class=val>");
-  b += val;
-  b += F("</span></div><div class=meter-track><div class='meter-fill ");
-  b += meterTone(pct);
-  b += F("' style='width:");
-  b += String(pct);
-  b += F("%'></div></div></div>");
-}
-
-static void appendDeviceMeters(String &b) {
-  b += F("<section><h2>设备</h2><div class=meters>");
-
-  // LittleFS
+// 设备指标 JSON（状态页异步拉取，避免首屏阻塞）
+static void handleApiDeviceGet() {
+  JsonDocument doc;
   {
     const uint64_t total = LittleFS.totalBytes();
     const uint64_t used = LittleFS.usedBytes();
-    char note[48];
     AlbumList al;
     albumList(al);
-    snprintf(note, sizeof(note), "相册 %d 张", al.count);
-    appendMeter(b, "存储 LittleFS", used, total, note);
+    JsonObject fs = doc["fs"].to<JsonObject>();
+    fs["used"] = used;
+    fs["total"] = total;
+    fs["album"] = al.count;
   }
-
-  // Internal heap（已用 = 总量 − 空闲）
   {
     const uint32_t total = ESP.getHeapSize();
     const uint32_t free_h = ESP.getFreeHeap();
-    const uint32_t used = total > free_h ? total - free_h : 0;
-    char extra[40];
-    snprintf(extra, sizeof(extra), "空闲 %u KB", (unsigned)(free_h / 1024));
-    appendMeter(b, "内存 Heap", used, total, extra);
+    JsonObject heap = doc["heap"].to<JsonObject>();
+    heap["used"] = total > free_h ? (total - free_h) : 0;
+    heap["total"] = total;
+    heap["free"] = free_h;
   }
-
-  // PSRAM
   {
     const uint32_t total = ESP.getPsramSize();
     if (total > 0) {
       const uint32_t free_p = ESP.getFreePsram();
-      const uint32_t used = total > free_p ? total - free_p : 0;
-      char extra[40];
-      snprintf(extra, sizeof(extra), "空闲 %u KB", (unsigned)(free_p / 1024));
-      appendMeter(b, "内存 PSRAM", used, total, extra);
+      JsonObject ps = doc["psram"].to<JsonObject>();
+      ps["used"] = total > free_p ? (total - free_p) : 0;
+      ps["total"] = total;
+      ps["free"] = free_p;
     }
   }
-
-  // App 分区（固件占用）
   {
     const uint32_t used = ESP.getSketchSize();
     const uint32_t free_s = ESP.getFreeSketchSpace();
-    const uint32_t total = used + free_s;
-    appendMeter(b, "固件 Flash", used, total, "含 OTA 余量");
+    JsonObject flash = doc["flash"].to<JsonObject>();
+    flash["used"] = used;
+    flash["total"] = used + free_s;
   }
-
-  // 电池
   {
     const BatteryStatus bat = batteryRead();
+    JsonObject battery = doc["battery"].to<JsonObject>();
+    battery["ok"] = bat.ok;
     if (bat.ok) {
-      const uint64_t pct = bat.percent;
-      char extra[48];
-      snprintf(extra, sizeof(extra), "%u mV · %s", (unsigned)bat.mv, batteryChargeLabel(bat.charge));
-      // 电量条：已用视觉 = 剩余百分比（满 = 满条）
-      b += F("<div class=meter><div class=meter-h><span class=lab>电池</span><span class=val>");
-      b += String((unsigned)pct);
-      b += F("% · ");
-      b += extra;
-      b += F("</span></div><div class=meter-track><div class='meter-fill ");
-      // 电量低才 warn/bad（与存储「占用高」相反）
-      if (pct <= 15) b += F("bad");
-      else if (pct <= 30) b += F("warn");
-      else b += F("ok");
-      b += F("' style='width:");
-      b += String((unsigned)pct);
-      b += F("%'></div></div></div>");
-    } else {
-      b += F("<p class=meter-note>电池：暂不可读</p>");
+      battery["percent"] = bat.percent;
+      battery["mv"] = bat.mv;
+      battery["charge"] = batteryChargeLabel(bat.charge);
     }
   }
+  doc["chip_rev"] = (int)ESP.getChipRevision();
+  doc["cpu_mhz"] = (unsigned)ESP.getCpuFreqMHz();
 
-  {
-    char chip[64];
-    snprintf(chip, sizeof(chip), "芯片 rev %d · CPU %u MHz", (int)ESP.getChipRevision(),
-             (unsigned)ESP.getCpuFreqMHz());
-    b += F("<p class=meter-note>");
-    b += chip;
-    b += F("</p>");
+  String out;
+  serializeJson(doc, out);
+  g_server.send(200, "application/json", out);
+}
+
+static void webStatusSendScript(WebServer &server) {
+  static const char kJs[] = R"STJS(<script>
+(function(){
+  const box=document.getElementById('device-meters');
+  if(!box) return;
+  function fmtBytes(n){
+    n=+n||0;
+    if(n>=1048576) return (n/1048576).toFixed(2)+' MB';
+    if(n>=1024) return (n/1024).toFixed(1)+' KB';
+    return n+' B';
   }
-
-  b += F("</div></section>");
+  function tone(pct){return pct>=90?'bad':pct>=75?'warn':'ok';}
+  function meter(lab,used,total,extra,pctOverride){
+    let pct=pctOverride!=null?pctOverride:(total>0?Math.min(100,Math.floor(used*100/total)):0);
+    let val=fmtBytes(used)+' / '+fmtBytes(total)+' · '+pct+'%';
+    if(extra) val+=' · '+extra;
+    return '<div class=meter><div class=meter-h><span class=lab>'+lab+
+      '</span><span class=val>'+val+'</span></div><div class=meter-track><div class="meter-fill '+
+      tone(pct)+'" style="width:'+pct+'%"></div></div></div>';
+  }
+  function batMeter(pct,extra){
+    const t=pct<=15?'bad':pct<=30?'warn':'ok';
+    return '<div class=meter><div class=meter-h><span class=lab>电池</span><span class=val>'+
+      pct+'% · '+extra+'</span></div><div class=meter-track><div class="meter-fill '+t+
+      '" style="width:'+pct+'%"></div></div></div>';
+  }
+  fetch('/api/device').then(r=>r.json()).then(d=>{
+    let h='<div class=meters>';
+    if(d.fs) h+=meter('存储 LittleFS',d.fs.used,d.fs.total,'相册 '+(d.fs.album|0)+' 张');
+    if(d.heap) h+=meter('内存 Heap',d.heap.used,d.heap.total,'空闲 '+Math.floor((d.heap.free||0)/1024)+' KB');
+    if(d.psram) h+=meter('内存 PSRAM',d.psram.used,d.psram.total,'空闲 '+Math.floor((d.psram.free||0)/1024)+' KB');
+    if(d.flash) h+=meter('固件 Flash',d.flash.used,d.flash.total,'含 OTA 余量');
+    if(d.battery&&d.battery.ok) h+=batMeter(d.battery.percent|0,(d.battery.mv|0)+' mV · '+(d.battery.charge||''));
+    else h+='<p class=meter-note>电池：暂不可读</p>';
+    h+='<p class=meter-note>芯片 rev '+(d.chip_rev|0)+' · CPU '+(d.cpu_mhz|0)+' MHz</p></div>';
+    box.innerHTML=h;
+  }).catch(()=>{box.innerHTML='<p class=meter-note>设备数据加载失败</p>';});
+})();
+</script>)STJS";
+  server.sendContent(kJs, strlen(kJs));
 }
 
 static void handleRoot() {
@@ -646,6 +744,8 @@ static void handleRoot() {
     snprintf(buf, sizeof(buf), "%d 张", al.count);
     kvRow(b, "相册", String(buf));
     kvRow(b, "相册标题栏", String(cfg.album_show_header ? "显示" : "隐藏"));
+    kvRow(b, "相册顺序", String(cfg.album_random ? "乱序" : "顺序"));
+    kvRow(b, "待办来源", String(cfg.todo_use_local ? "本机正文" : "网络日记"));
     if (!cfg.album_refresh_en) {
       kvRow(b, "相册定时", String("<span class='pill off'>关</span>"));
     } else {
@@ -655,6 +755,37 @@ static void handleRoot() {
       snprintf(buf2, sizeof(buf2), "<span class='pill on'>开 · %u天%u时%u分</span>", (unsigned)d,
                (unsigned)h, (unsigned)m);
       kvRow(b, "相册定时", String(buf2));
+    }
+  }
+  {
+    kvRow(b, "象棋顺序", String(cfg.chess_random ? "乱序" : "顺序"));
+    String lv;
+    if (cfg.chess_levels & CHESS_LV_OPENING) {
+      lv += "开局";
+    }
+    if (cfg.chess_levels & CHESS_LV_TACTIC) {
+      if (lv.length()) lv += " · ";
+      lv += "战术";
+    }
+    if (cfg.chess_levels & CHESS_LV_MIDDLE) {
+      if (lv.length()) lv += " · ";
+      lv += "中局";
+    }
+    if (cfg.chess_levels & CHESS_LV_ENDGAME) {
+      if (lv.length()) lv += " · ";
+      lv += "残局";
+    }
+    if (!lv.length()) lv = "全部";
+    kvRow(b, "象棋内容", lv);
+    if (!cfg.chess_refresh_en) {
+      kvRow(b, "象棋定时", String("<span class='pill off'>关</span>"));
+    } else {
+      uint32_t d = 0, h = 0, m = 0;
+      weatherRefreshToDhm(cfg.chess_refresh_sec, d, h, m);
+      char buf3[80];
+      snprintf(buf3, sizeof(buf3), "<span class='pill on'>开 · %u天%u时%u分</span>", (unsigned)d,
+               (unsigned)h, (unsigned)m);
+      kvRow(b, "象棋定时", String(buf3));
     }
   }
   {
@@ -714,8 +845,10 @@ static void handleRoot() {
     kvRow(b, "应用", apps);
   }
   b += F("</dl></section>");
-  appendDeviceMeters(b);
-  sendHtml(NavTab::Status, b);
+  // 设备指标异步加载：先出页面骨架，再请求 /api/device
+  b += F("<section><h2>设备</h2><div id=device-meters>"
+         "<p class=meter-loading>加载中…</p></div></section>");
+  sendHtml(NavTab::Status, b, webStatusSendScript);
 }
 
 static const char *appCardSvg(AppId id) {
@@ -747,6 +880,10 @@ static const char *appCardSvg(AppId id) {
              "<path d='M8 20h8M10 20v-3h4v3'/>"
              "<path d='M9 17c0-2 1-3 3-4 2 1 3 2 3 4'/>"
              "<circle cx='12' cy='9' r='2'/></svg>";
+    case AppId::Quote:
+      return "<svg viewBox='0 0 24 24' fill='none' stroke='#1a1a1a' stroke-width='2'>"
+             "<path d='M7 8h5v5H8a1 1 0 0 1-1-1V8zM14 8h5v5h-4a1 1 0 0 1-1-1V8z'/>"
+             "<path d='M8 13c0 3 2 5 4 6M16 13c0 3 2 5 4 6'/></svg>";
     default:
       return "";
   }
@@ -880,7 +1017,96 @@ static void handleSettingsGet() {
   b += F(">");
   b += F("<div class=btn-row><button type=submit name=action value=set_manual>写入 RTC</button></div>");
   b += F("</form></section>");
+
   sendHtml(NavTab::Settings, b);
+}
+
+static void handleChessGet() {
+  const AppConfig &cfg = getAppConfig();
+  String b;
+  appendFlashFromQuery(b);
+
+  uint32_t d = 0, h = 0, m = 0;
+  weatherRefreshToDhm(cfg.chess_refresh_sec, d, h, m);
+  const uint8_t lv = cfg.chess_levels ? cfg.chess_levels : CHESS_LV_ALL;
+  b += F("<section><h2>象棋练习</h2>"
+         "<p class=hint>控制练习局面的播放顺序、内容等级，以及停留在象棋 App 时的自动翻局（关机亦可 RTC 定时醒）。"
+         "间隔至少 <strong>1 分钟</strong>。等级可多选；全不选则视为全部。</p>"
+         "<form method=POST action=/chess>"
+         "<label>播放顺序</label><select name=order>"
+         "<option value=seq");
+  if (!cfg.chess_random) b += F(" selected");
+  b += F(">顺序</option><option value=rand");
+  if (cfg.chess_random) b += F(" selected");
+  b += F(">乱序</option></select>"
+         "<label>内容等级</label>"
+         "<div class=btn-row style=flex-wrap:wrap;gap:8px>");
+  const struct {
+    uint8_t bit;
+    const char *name;
+    const char *lab;
+  } lvItems[] = {
+      {CHESS_LV_OPENING, "lv_opening", "开局"},
+      {CHESS_LV_TACTIC, "lv_tactic", "战术"},
+      {CHESS_LV_MIDDLE, "lv_middle", "中局"},
+      {CHESS_LV_ENDGAME, "lv_endgame", "残局"},
+  };
+  for (const auto &it : lvItems) {
+    const int cnt = chessCountForLevel(it.bit);
+    b += F("<label class='check-row");
+    if (lv & it.bit) b += F(" on");
+    b += F("' style=margin:0><input type=checkbox name=");
+    b += it.name;
+    b += F(" value=1");
+    if (lv & it.bit) b += F(" checked");
+    b += F("><span>");
+    b += it.lab;
+    b += F(" <small style=font-weight:500;opacity:.75>(");
+    b += String(cnt);
+    b += F(")</small></span></label>");
+  }
+  b += F("<p class=meta style=margin:8px 0 0>当前可选局面合计 ");
+  b += String(chessPositionCount());
+  b += F(" / 内置 ");
+  b += String(chessCountForLevel(CHESS_LV_ALL));
+  b += F("</p>");
+  b += F("</div>"
+         "<label class='check-row");
+  if (cfg.chess_refresh_en) b += F(" on");
+  b += F("'><input type=checkbox name=refresh_en value=1");
+  if (cfg.chess_refresh_en) b += F(" checked");
+  b += F("><span>启用定时翻局</span></label>"
+         "<div class=btn-row style=align-items:flex-end;gap:10px>"
+         "<label style=margin:0>天<br><input name=refresh_d type=number min=0 max=365 step=1 value=");
+  b += String(d);
+  b += F(" style=width:5.5em></label>"
+         "<label style=margin:0>时<br><input name=refresh_h type=number min=0 max=23 step=1 value=");
+  b += String(h);
+  b += F(" style=width:5.5em></label>"
+         "<label style=margin:0>分<br><input name=refresh_m type=number min=0 max=59 step=1 value=");
+  b += String(m);
+  b += F(" style=width:5.5em></label></div>"
+         "<div class=btn-row><button type=submit>保存象棋设置</button></div></form></section>");
+
+  sendHtml(NavTab::Chess, b);
+}
+
+static void handleChessPost() {
+  const bool random_order = g_server.arg("order") == "rand";
+  uint8_t levels = 0;
+  if (g_server.hasArg("lv_opening")) levels |= CHESS_LV_OPENING;
+  if (g_server.hasArg("lv_tactic")) levels |= CHESS_LV_TACTIC;
+  if (g_server.hasArg("lv_middle")) levels |= CHESS_LV_MIDDLE;
+  if (g_server.hasArg("lv_endgame")) levels |= CHESS_LV_ENDGAME;
+  if (levels == 0) levels = CHESS_LV_ALL;
+
+  const bool refresh_en = g_server.hasArg("refresh_en");
+  const uint32_t d = (uint32_t)g_server.arg("refresh_d").toInt();
+  const uint32_t h = (uint32_t)g_server.arg("refresh_h").toInt();
+  const uint32_t m = (uint32_t)g_server.arg("refresh_m").toInt();
+  const uint32_t sec = weatherRefreshSecFromDhm(d, h, m);
+  saveChessSettings(random_order, levels, refresh_en, sec);
+  redirectOk("/chess", "chess");
 }
 
 static void handleAppsPost() {
@@ -1089,83 +1315,146 @@ static void handleAuthPost() {
   sendHtml(NavTab::Auth, b);
 }
 
+static void appendTodoPreviewList(String &b, const String &content) {
+  TodoItem items[TODO_ITEM_MAX];
+  const int n = todoParseContent(content, items, TODO_ITEM_MAX);
+  int open_n = 0;
+  for (int i = 0; i < n; i++) {
+    if (!items[i].done) open_n++;
+  }
+  b += F("<p class=meta>");
+  b += String(open_n);
+  b += F("/");
+  b += String(n);
+  b += F(" open</p>");
+  if (n == 0) {
+    b += F("<pre>");
+    String c = content;
+    c.replace("&", "&amp;");
+    c.replace("<", "&lt;");
+    b += c;
+    b += F("</pre>");
+  } else {
+    b += F("<ul class=todo-list>");
+    for (int i = 0; i < n; i++) {
+      b += F("<li");
+      if (items[i].done) b += F(" class=done");
+      b += F("><span class=box></span><div class=txt>");
+      String c = items[i].content;
+      c.replace("&", "&amp;");
+      c.replace("<", "&lt;");
+      b += c;
+      if (items[i].note.length()) {
+        b += F("<span class=note>");
+        String note = items[i].note;
+        note.replace("&", "&amp;");
+        note.replace("<", "&lt;");
+        b += note;
+        b += F("</span>");
+      }
+      b += F("</div></li>");
+    }
+    b += F("</ul>");
+  }
+}
+
+static void appendTodoPage(String &b, const char *flash_html = nullptr) {
+  const AppConfig &cfg = getAppConfig();
+  if (flash_html && flash_html[0]) b += flash_html;
+  appendFlashFromQuery(b);
+
+  b += F("<section><h2>数据源</h2>"
+         "<p class=hint>可选 Portal 日记，或直接在本页用日记原文格式书写本机待办。</p>"
+         "<p class='hint sm'>规则：每行一项；<code>- </code>未完成、<code>= </code>已完成；"
+         "可选 <code> #备注</code>（黄字）。例：<code>- 买菜 #晚上</code></p>"
+         "<form method=POST action=/todo>"
+         "<input type=hidden name=action value=mode>"
+         "<label class='check-row");
+  if (cfg.todo_use_local) b += F(" on");
+  b += F("'><input type=checkbox name=use_local value=1");
+  if (cfg.todo_use_local) b += F(" checked");
+  b += F("><span>使用本机正文（不拉网络）</span></label>"
+         "<div class=btn-row><button type=submit>保存数据源</button></div></form></section>");
+
+  String local;
+  todoLocalLoad(local);
+  b += F("<section><h2>本机正文</h2>"
+         "<form method=POST action=/todo>"
+         "<input type=hidden name=action value=save_local>"
+         "<label>正文</label><textarea class=todo-src name=content>");
+  String esc = local;
+  esc.replace("&", "&amp;");
+  esc.replace("<", "&lt;");
+  esc.replace(">", "&gt;");
+  b += esc;
+  b += F("</textarea>"
+         "<div class=btn-row><button type=submit>保存本机待办</button></div></form>");
+  if (local.length()) {
+    b += F("<h2 style=margin-top:18px>本机预览</h2>");
+    appendTodoPreviewList(b, local);
+  }
+  b += F("</section>");
+
+  b += F("<section><h2>网络日记</h2>"
+         "<p class=hint>从 portal <code>GET /diary/detail</code> 拉取，需「同 WiFi 站点」已连外网并登录。"
+         "拉取结果仅预览，不会覆盖本机正文。</p>"
+         "<form method=POST action=/todo><input type=hidden name=action value=fetch>"
+         "<div class=btn-row><button type=submit>立即拉取</button></div></form></section>");
+}
+
 static void handleTodoGet() {
   String b;
-  b += F("<section><h2>待办预览</h2>");
-  b += F("<p class=hint>从 portal <code>GET /diary/detail</code> 拉取，需「同 WiFi 站点」已连外网并登录。</p>");
-  b += F("<form method=POST action=/todo><div class=btn-row>"
-         "<button type=submit>立即拉取</button></div></form></section>");
+  appendTodoPage(b);
   sendHtml(NavTab::Todo, b);
 }
 
 static void handleTodoPost() {
+  const String action = g_server.hasArg("action") ? g_server.arg("action") : String("fetch");
   String b;
+
+  if (action == "mode") {
+    saveTodoUseLocal(g_server.hasArg("use_local"));
+    redirectOk("/todo", "todo_mode");
+    return;
+  }
+  if (action == "save_local") {
+    const String content = g_server.arg("content");
+    if (!todoLocalSave(content)) {
+      appendTodoPage(b, "<div class='flash err'>本机待办保存失败</div>");
+      sendHtml(NavTab::Todo, b);
+      return;
+    }
+    redirectOk("/todo", "todo_local");
+    return;
+  }
+
+  // fetch
   if (!wifiIsStaConnected()) {
-    b += F("<section><div class='flash err'>需要「同 WiFi 站点」已连接外网才能拉日记</div>");
-    b += F("<form method=POST action=/todo><div class=btn-row>"
-           "<button type=submit>重试</button></div></form></section>");
+    appendTodoPage(b, "<div class='flash err'>需要「同 WiFi 站点」已连接外网才能拉日记</div>");
     sendHtml(NavTab::Todo, b);
     return;
   }
   DiaryDetail d;
   if (!diaryFetchById(nullptr, d)) {
-    b += F("<section><div class='flash err'>");
-    b += d.message;
-    b += F("</div><form method=POST action=/todo><div class=btn-row>"
-           "<button type=submit>重试</button></div></form></section>");
-  } else {
-    TodoItem items[TODO_ITEM_MAX];
-    const int n = todoParseContent(d.content, items, TODO_ITEM_MAX);
-    int open_n = 0;
-    for (int i = 0; i < n; i++) {
-      if (!items[i].done) open_n++;
-    }
-    b += F("<div class='flash ok'>待办已拉取</div>");
-    b += F("<section><h2>");
-    b += d.title.length() ? d.title : String("Todo");
-    b += F("</h2><p class=meta>#");
-    b += d.id;
-    b += F(" · ");
-    b += d.date;
-    b += F(" · ");
-    b += d.category;
-    b += F(" · ");
-    b += String(open_n);
-    b += F("/");
-    b += String(n);
-    b += F(" open</p>");
-    if (n == 0) {
-      b += F("<pre>");
-      String c = d.content;
-      c.replace("&", "&amp;");
-      c.replace("<", "&lt;");
-      b += c;
-      b += F("</pre>");
-    } else {
-      b += F("<ul class=todo-list>");
-      for (int i = 0; i < n; i++) {
-        b += F("<li");
-        if (items[i].done) b += F(" class=done");
-        b += F("><span class=box></span><div class=txt>");
-        String c = items[i].content;
-        c.replace("&", "&amp;");
-        c.replace("<", "&lt;");
-        b += c;
-        if (items[i].note.length()) {
-          b += F("<span class=note>");
-          String note = items[i].note;
-          note.replace("&", "&amp;");
-          note.replace("<", "&lt;");
-          b += note;
-          b += F("</span>");
-        }
-        b += F("</div></li>");
-      }
-      b += F("</ul>");
-    }
-    b += F("<form method=POST action=/todo><div class=btn-row style=margin-top:16px>"
-           "<button type=submit>再拉一次</button></div></form></section>");
+    String flash = "<div class='flash err'>";
+    flash += d.message;
+    flash += "</div>";
+    appendTodoPage(b, flash.c_str());
+    sendHtml(NavTab::Todo, b);
+    return;
   }
+  appendTodoPage(b, "<div class='flash ok'>待办已拉取（仅预览）</div>");
+  b += F("<section><h2>");
+  b += d.title.length() ? d.title : String("Todo");
+  b += F("</h2><p class=meta>#");
+  b += d.id;
+  b += F(" · ");
+  b += d.date;
+  b += F(" · ");
+  b += d.category;
+  b += F("</p>");
+  appendTodoPreviewList(b, d.content);
+  b += F("</section>");
   sendHtml(NavTab::Todo, b);
 }
 
@@ -1349,6 +1638,593 @@ static void handleAlbumGet() {
   sendHtml(NavTab::Album, b, webAlbumSendScript);
 }
 
+static void webQuoteSendScript(WebServer &server) {
+  // 左列表点选 → 右栏编辑；新增 / 删除由表单 POST
+  static const char kJs[] = R"QJS(<script>
+(function(){
+  const root=document.getElementById('quote-editor');
+  const list=document.getElementById('quote-list');
+  const form=document.getElementById('quote-form');
+  if(!root||!list||!form||typeof QUOTES==='undefined') return;
+  const title=document.getElementById('q-ed-title');
+  const hint=document.getElementById('q-ed-hint');
+  const action=document.getElementById('q-action');
+  const idxEl=document.getElementById('q-idx');
+  const textEl=document.getElementById('q-text');
+  const authorEl=document.getElementById('q-author');
+  const saveBtn=document.getElementById('q-save');
+  const delBtn=document.getElementById('q-del');
+  let cur=-1;
+  function setOn(i){
+    list.querySelectorAll('button[data-i]').forEach(function(btn){
+      btn.classList.toggle('on', +btn.getAttribute('data-i')===i);
+    });
+  }
+  function select(i){
+    if(i<0||i>=QUOTES.length){ startAdd(); return; }
+    cur=i;
+    root.classList.remove('is-empty');
+    setOn(i);
+    action.value='save_one';
+    idxEl.value=String(i);
+    textEl.value=QUOTES[i].t||'';
+    authorEl.value=QUOTES[i].a||'';
+    title.textContent='编辑 #'+(i+1);
+    hint.textContent='修改后点「保存」；诗词请在正文里换行分句。';
+    saveBtn.textContent='保存';
+    delBtn.style.display='';
+    delBtn.disabled=false;
+  }
+  function startAdd(){
+    cur=-1;
+    root.classList.remove('is-empty');
+    setOn(-1);
+    action.value='add';
+    idxEl.value='-1';
+    textEl.value='';
+    authorEl.value='';
+    title.textContent='新增名言';
+    hint.textContent='填写正文后点「添加」。最多 '+MAX_QUOTES+' 条。';
+    saveBtn.textContent='添加';
+    delBtn.style.display='none';
+    textEl.focus();
+  }
+  list.addEventListener('click',function(e){
+    const btn=e.target.closest('button[data-i]');
+    if(!btn) return;
+    select(+btn.getAttribute('data-i'));
+  });
+  const addBtn=document.getElementById('q-add');
+  if(addBtn) addBtn.addEventListener('click',function(e){ e.preventDefault(); startAdd(); });
+  if(delBtn) delBtn.addEventListener('click',function(){
+    if(cur<0) return;
+    if(!confirm('删除第 '+(cur+1)+' 条？')){ return; }
+    action.value='delete';
+    idxEl.value=String(cur);
+  });
+  form.addEventListener('submit',function(e){
+    if(action.value==='delete') return;
+    const t=(textEl.value||'').trim();
+    if(!t){ e.preventDefault(); alert('正文不能为空'); }
+  });
+  const init=typeof INIT_QUOTE_IDX==='number'?INIT_QUOTE_IDX:-1;
+  if(QUOTES.length===0) startAdd();
+  else if(init>=0&&init<QUOTES.length) select(init);
+  else select(0);
+})();
+</script>)QJS";
+  server.sendContent(kJs, strlen(kJs));
+}
+
+static void handleQuoteGet() {
+  const AppConfig &cfg = getAppConfig();
+  String b;
+  appendFlashFromQuery(b);
+
+  quoteEnsureDefaults();
+  // 列表缓冲走堆，避免与 WebServer/String 叠爆 loopTask 栈
+  QuoteItem *items = new (std::nothrow) QuoteItem[QUOTE_ITEM_MAX];
+  if (!items) {
+    String err;
+    err += F("<div class='flash err'>名言列表内存不足</div>");
+    sendHtml(NavTab::Quote, err);
+    return;
+  }
+  int n = 0, idx = 0;
+  quoteLoad(items, QUOTE_ITEM_MAX, n, idx);
+
+  // 保存后回跳选中该条：?i=N
+  int sel = g_server.hasArg("i") ? g_server.arg("i").toInt() : 0;
+  if (n <= 0) sel = -1;
+  else if (sel < 0) sel = 0;
+  else if (sel >= n) sel = n - 1;
+
+  uint32_t d = 0, h = 0, m = 0;
+  weatherRefreshToDhm(cfg.quote_refresh_sec, d, h, m);
+
+  b += F("<section><h2>名言警句</h2>"
+         "<p class=hint>每条含「内容」与「作者」；设备停留在「名言」App 时可按间隔翻条（关机亦可 RTC 定时醒）。</p>"
+         "<form method=POST action=/quote>"
+         "<input type=hidden name=action value=settings>"
+         "<label>播放顺序</label><select name=order>"
+         "<option value=seq");
+  if (!cfg.quote_random) b += F(" selected");
+  b += F(">顺序</option><option value=rand");
+  if (cfg.quote_random) b += F(" selected");
+  b += F(">乱序</option></select>"
+         "<label class='check-row");
+  if (cfg.quote_refresh_en) b += F(" on");
+  b += F("'><input type=checkbox name=refresh_en value=1");
+  if (cfg.quote_refresh_en) b += F(" checked");
+  b += F("><span>启用定时翻条</span></label>"
+         "<div class=btn-row style=align-items:flex-end;gap:10px>"
+         "<label style=margin:0>天<br><input name=refresh_d type=number min=0 max=365 step=1 value=");
+  b += String(d);
+  b += F(" style=width:5.5em></label>"
+         "<label style=margin:0>时<br><input name=refresh_h type=number min=0 max=23 step=1 value=");
+  b += String(h);
+  b += F(" style=width:5.5em></label>"
+         "<label style=margin:0>分<br><input name=refresh_m type=number min=0 max=59 step=1 value=");
+  b += String(m);
+  b += F(" style=width:5.5em></label></div>"
+         "<div class=btn-row><button type=submit>保存名言设置</button></div></form></section>");
+
+  b += F("<section><h2>名言列表</h2>"
+         "<p class='hint sm'>左侧点选一条，右侧修改或删除；「新增」追加空条。诗词在正文换行分句。最多 ");
+  b += String(QUOTE_ITEM_MAX);
+  b += F(" 条。</p>"
+         "<div class=quote-toolbar><p class=meta>当前 ");
+  b += String(n);
+  b += F(" 条");
+  if (n > 0) {
+    b += F(" · 展示第 ");
+    b += String(idx + 1);
+    b += F(" 条");
+  }
+  b += F("</p><div class=btn-row>"
+         "<button type=button id=q-add class=secondary>新增</button>"
+         "<form method=POST action=/quote onsubmit=\"return confirm('恢复内置列表？将覆盖当前全部条目。');\">"
+         "<input type=hidden name=action value=reset>"
+         "<button type=submit class=danger>恢复内置列表</button></form></div></div>"
+         "<div class=quote-layout>"
+         "<aside class=quote-side><div class=quote-side-h>条目</div><div id=quote-list class=quote-list>");
+  for (int i = 0; i < n; i++) {
+    b += F("<button type=button data-i=");
+    b += String(i);
+    if (i == sel) b += F(" class=on");
+    b += F("><span class=q-i>#");
+    b += String(i + 1);
+    b += F("</span><span class=q-t>");
+    appendHtmlText(b, quotePreviewLine(items[i].text));
+    b += F("</span><span class=q-a>");
+    appendHtmlText(b, items[i].author.length() ? items[i].author : String(F("（无作者）")));
+    b += F("</span></button>");
+  }
+  if (n == 0) {
+    b += F("<p class='hint sm' style=padding:16px>暂无条目，点右上「新增」。</p>");
+  }
+  b += F("</div></aside>"
+         "<div id=quote-editor class=quote-editor");
+  if (n == 0) b += F(" is-empty");
+  b += F(">"
+         "<div class=q-ed-empty>从左侧选择一条，或点「新增」。</div>"
+         "<form id=quote-form class=q-ed-form method=POST action=/quote>"
+         "<input type=hidden name=action id=q-action value=save_one>"
+         "<input type=hidden name=idx id=q-idx value=");
+  b += String(sel >= 0 ? sel : -1);
+  b += F(">"
+         "<h3 id=q-ed-title class=q-ed-title>");
+  if (sel >= 0) {
+    b += F("编辑 #");
+    b += String(sel + 1);
+  } else {
+    b += F("新增名言");
+  }
+  b += F("</h3>"
+         "<p id=q-ed-hint class=q-ed-hint>修改后点「保存」；诗词请在正文里换行分句。</p>"
+         "<label>正文</label>"
+         "<textarea id=q-text name=text maxlength=");
+  b += String(QUOTE_TEXT_MAX);
+  b += F(" placeholder=\"名言，或诗词（每句一行）\" required>");
+  if (sel >= 0) appendHtmlText(b, items[sel].text);
+  b += F("</textarea>"
+         "<label>作者 / 出处</label>"
+         "<input id=q-author name=author maxlength=");
+  b += String(QUOTE_AUTHOR_MAX);
+  b += F(" value=\"");
+  if (sel >= 0) b += htmlEscapeAttr(items[sel].author.c_str());
+  b += F("\" placeholder=\"如：李白《静夜思》\" autocomplete=off>"
+         "<div class='btn-row q-ed-actions'>"
+         "<button type=submit id=q-save>");
+  b += (sel >= 0) ? F("保存") : F("添加");
+  b += F("</button>"
+         "<button type=submit id=q-del class='danger q-del' formnovalidate");
+  if (sel < 0) b += F(" style=display:none");
+  b += F(">删除</button>"
+         "</div></form></div></div></section>"
+         "<script>const MAX_QUOTES=");
+  b += String(QUOTE_ITEM_MAX);
+  b += F(";const INIT_QUOTE_IDX=");
+  b += String(sel);
+  b += F(";const QUOTES=[");
+  for (int i = 0; i < n; i++) {
+    if (i) b += ',';
+    b += F("{t:\"");
+    appendJsStringContent(b, items[i].text);
+    b += F("\",a:\"");
+    appendJsStringContent(b, items[i].author);
+    b += F("\"}");
+  }
+  b += F("];</script>");
+  delete[] items;
+  sendHtml(NavTab::Quote, b, webQuoteSendScript);
+}
+
+// 加载名言列表到堆缓冲；失败返回 nullptr（调用方 delete[]）
+static QuoteItem *quoteLoadHeap(int &out_n, int &out_idx) {
+  QuoteItem *items = new (std::nothrow) QuoteItem[QUOTE_ITEM_MAX];
+  if (!items) return nullptr;
+  out_n = 0;
+  out_idx = 0;
+  if (!quoteLoad(items, QUOTE_ITEM_MAX, out_n, out_idx)) {
+    out_n = 0;
+    out_idx = 0;
+  }
+  return items;
+}
+
+static void quoteRedirectSel(const char *code, int sel) {
+  String loc = F("/quote?ok=");
+  loc += code;
+  if (sel >= 0) {
+    loc += F("&i=");
+    loc += String(sel);
+  }
+  g_server.sendHeader("Location", loc);
+  g_server.send(303);
+}
+
+static void handleQuotePost() {
+  const String action = g_server.arg("action");
+  if (action == "reset") {
+    if (!quoteResetToDefaults()) {
+      String b;
+      b += F("<div class='flash err'>恢复内置列表失败</div>");
+      sendHtml(NavTab::Quote, b);
+      return;
+    }
+    redirectOk("/quote", "quote_reset");
+    return;
+  }
+
+  // 单条保存 / 新增 / 删除
+  if (action == "save_one" || action == "add" || action == "delete") {
+    int n = 0, stored = 0;
+    QuoteItem *items = quoteLoadHeap(n, stored);
+    if (!items) {
+      String b;
+      b += F("<div class='flash err'>名言列表内存不足</div>");
+      sendHtml(NavTab::Quote, b);
+      return;
+    }
+
+    if (action == "delete") {
+      const int di = g_server.arg("idx").toInt();
+      if (di < 0 || di >= n) {
+        delete[] items;
+        String b;
+        b += F("<div class='flash err'>删除失败：下标无效</div>");
+        sendHtml(NavTab::Quote, b);
+        return;
+      }
+      for (int i = di; i < n - 1; i++) items[i] = items[i + 1];
+      n--;
+      if (stored > di) stored--;
+      else if (stored >= n) stored = n > 0 ? n - 1 : 0;
+      const bool ok = quoteSave(items, n, stored);
+      delete[] items;
+      if (!ok) {
+        String b;
+        b += F("<div class='flash err'>删除失败</div>");
+        sendHtml(NavTab::Quote, b);
+        return;
+      }
+      const int sel = (n > 0) ? (di < n ? di : n - 1) : -1;
+      quoteRedirectSel("quote_del", sel);
+      return;
+    }
+
+    QuoteItem it;
+    it.text = g_server.arg("text");
+    it.author = g_server.hasArg("author") ? g_server.arg("author") : String();
+    it.text.trim();
+    it.author.trim();
+    if (it.text.isEmpty()) {
+      delete[] items;
+      String b;
+      b += F("<div class='flash err'>正文不能为空</div>");
+      sendHtml(NavTab::Quote, b);
+      return;
+    }
+    if (it.text.length() > QUOTE_TEXT_MAX) it.text.remove(QUOTE_TEXT_MAX);
+    if (it.author.length() > QUOTE_AUTHOR_MAX) it.author.remove(QUOTE_AUTHOR_MAX);
+
+    int sel = 0;
+    if (action == "add") {
+      if (n >= QUOTE_ITEM_MAX) {
+        delete[] items;
+        String b;
+        b += F("<div class='flash err'>已达上限，无法再添加</div>");
+        sendHtml(NavTab::Quote, b);
+        return;
+      }
+      items[n] = it;
+      sel = n;
+      n++;
+    } else {
+      const int ui = g_server.arg("idx").toInt();
+      if (ui < 0 || ui >= n) {
+        delete[] items;
+        String b;
+        b += F("<div class='flash err'>保存失败：下标无效</div>");
+        sendHtml(NavTab::Quote, b);
+        return;
+      }
+      items[ui] = it;
+      sel = ui;
+    }
+
+    const bool ok = quoteSave(items, n, stored);
+    delete[] items;
+    if (!ok) {
+      String b;
+      b += F("<div class='flash err'>名言保存失败</div>");
+      sendHtml(NavTab::Quote, b);
+      return;
+    }
+    quoteRedirectSel(action == "add" ? "quote_add" : "quote_one", sel);
+    return;
+  }
+
+  const bool random_order = g_server.arg("order") == "rand";
+  const bool refresh_en = g_server.hasArg("refresh_en");
+  const uint32_t d = (uint32_t)g_server.arg("refresh_d").toInt();
+  const uint32_t h = (uint32_t)g_server.arg("refresh_h").toInt();
+  const uint32_t m = (uint32_t)g_server.arg("refresh_m").toInt();
+  saveQuoteSettings(random_order, refresh_en, weatherRefreshSecFromDhm(d, h, m));
+  redirectOk("/quote", "quote");
+}
+
+static void appendRefreshDhmFields(String &b, const char *prefix, uint32_t sec) {
+  uint32_t d = 0, h = 0, m = 0;
+  weatherRefreshToDhm(sec, d, h, m);
+  b += F("<div class=btn-row style=align-items:flex-end;gap:10px>"
+         "<label style=margin:0>天<br><input name=");
+  b += prefix;
+  b += F("_d type=number min=0 max=365 step=1 value=");
+  b += String(d);
+  b += F(" style=width:5.5em></label>"
+         "<label style=margin:0>时<br><input name=");
+  b += prefix;
+  b += F("_h type=number min=0 max=23 step=1 value=");
+  b += String(h);
+  b += F(" style=width:5.5em></label>"
+         "<label style=margin:0>分<br><input name=");
+  b += prefix;
+  b += F("_m type=number min=0 max=59 step=1 value=");
+  b += String(m);
+  b += F(" style=width:5.5em></label></div>");
+}
+
+static void handleScheduleGet() {
+  const AppConfig &cfg = getAppConfig();
+  String b;
+  appendFlashFromQuery(b);
+
+  b += F("<section><h2>定时刷新总览</h2>"
+         "<p class=hint>统一管理各 App 定时动作。也可在对应 App 页单独改。静默时段内"
+         "<strong>不作任何定时动作</strong>（刷新 / 翻页 / App 时间表），过了再说。</p>"
+         "<form method=POST action=/schedule><input type=hidden name=action value=refresh>");
+
+  auto refreshBlock = [&](const char *title, const char *en_name, bool en, const char *prefix,
+                          uint32_t sec) {
+    b += F("<h2 style=margin-top:18px>");
+    b += title;
+    b += F("</h2><label class='check-row");
+    if (en) b += F(" on");
+    b += F("'><input type=checkbox name=");
+    b += en_name;
+    b += F(" value=1");
+    if (en) b += F(" checked");
+    b += F("><span>启用</span></label>");
+    appendRefreshDhmFields(b, prefix, sec);
+  };
+  refreshBlock("天气", "wx_en", cfg.weather_refresh_en, "wx", cfg.weather_refresh_sec);
+  refreshBlock("相册", "alb_en", cfg.album_refresh_en, "alb", cfg.album_refresh_sec);
+  refreshBlock("象棋", "ch_en", cfg.chess_refresh_en, "ch", cfg.chess_refresh_sec);
+  refreshBlock("名言", "qt_en", cfg.quote_refresh_en, "qt", cfg.quote_refresh_sec);
+  b += F("<div class=btn-row><button type=submit>保存定时刷新</button></div></form></section>");
+
+  // 可视化：静默 + App 切换
+  b += F("<section><h2>一日时间轴</h2><div class=sched-day>");
+  for (uint8_t i = 0; i < cfg.quiet_count; i++) {
+    const QuietSlot &q = cfg.quiet_slots[i];
+    if (q.start_min < q.end_min) {
+      const float l = q.start_min * 100.0f / 1440.0f;
+      const float w = (q.end_min - q.start_min) * 100.0f / 1440.0f;
+      b += F("<span class=q style='left:");
+      b += String(l, 2);
+      b += F("%;width:");
+      b += String(w, 2);
+      b += F("%'></span>");
+    } else {
+      // 跨午夜拆两段
+      const float l1 = q.start_min * 100.0f / 1440.0f;
+      b += F("<span class=q style='left:");
+      b += String(l1, 2);
+      b += F("%;width:");
+      b += String(100.0f - l1, 2);
+      b += F("%'></span><span class=q style='left:0;width:");
+      b += String(q.end_min * 100.0f / 1440.0f, 2);
+      b += F("%'></span>");
+    }
+  }
+  for (uint8_t i = 0; i < cfg.app_sched_count; i++) {
+    const float l = cfg.app_sched[i].at_min * 100.0f / 1440.0f;
+    b += F("<span class=m title='");
+    b += appIdLabelZh(static_cast<AppId>(cfg.app_sched[i].app_id));
+    b += F("' style='left:");
+    b += String(l, 2);
+    b += F("%'></span>");
+  }
+  b += F("<div class=lab><span>00:00</span><span>06:00</span><span>12:00</span>"
+         "<span>18:00</span><span>24:00</span></div></div>"
+         "<p class='hint sm'>红块=静默；黑竖线=切 App。下方可编辑。</p></section>");
+
+  b += F("<section><h2>静默时段</h2>"
+         "<p class=hint>一天可多段；结束早于开始表示跨午夜（如 22:00–06:00）。</p>"
+         "<form method=POST action=/schedule><input type=hidden name=action value=quiet>"
+         "<label class='check-row");
+  if (cfg.quiet_en) b += F(" on");
+  b += F("'><input type=checkbox name=quiet_en value=1");
+  if (cfg.quiet_en) b += F(" checked");
+  b += F("><span>启用静默</span></label>");
+  for (int i = 0; i < QUIET_SLOT_MAX; i++) {
+    char sh[8] = "", eh[8] = "";
+    if (i < cfg.quiet_count) {
+      scheduleFormatHm(cfg.quiet_slots[i].start_min, sh, sizeof(sh));
+      scheduleFormatHm(cfg.quiet_slots[i].end_min, eh, sizeof(eh));
+    }
+    b += F("<div class='sched-row quiet'>"
+           "<label>开始<br><input name=q_start_");
+    b += String(i);
+    b += F(" placeholder=22:00 value=\"");
+    b += sh;
+    b += F("\"></label><label>结束<br><input name=q_end_");
+    b += String(i);
+    b += F(" placeholder=06:00 value=\"");
+    b += eh;
+    b += F("\"></label></div>");
+  }
+  b += F("<div class=btn-row><button type=submit>保存静默时段</button></div></form></section>");
+
+  b += F("<section><h2>每日 App 时间表</h2>"
+         "<p class=hint>到点自动切到指定 App（可选手界面）。按时间表走；静默时段内不切换。</p>"
+         "<form method=POST action=/schedule><input type=hidden name=action value=appsched>"
+         "<label class='check-row");
+  if (cfg.app_sched_en) b += F(" on");
+  b += F("'><input type=checkbox name=app_sched_en value=1");
+  if (cfg.app_sched_en) b += F(" checked");
+  b += F("><span>启用时间表</span></label>");
+  for (int i = 0; i < APP_SCHED_MAX; i++) {
+    char at[8] = "";
+    uint8_t app = 0, view = 0;
+    if (i < cfg.app_sched_count) {
+      scheduleFormatHm(cfg.app_sched[i].at_min, at, sizeof(at));
+      app = cfg.app_sched[i].app_id;
+      view = cfg.app_sched[i].view;
+    }
+    b += F("<div class=sched-row><label>时间<br><input name=s_at_");
+    b += String(i);
+    b += F(" placeholder=08:00 value=\"");
+    b += at;
+    b += F("\"></label><label>App<br><select name=s_app_");
+    b += String(i);
+    b += F("><option value=''>—</option>");
+    for (int a = 0; a < static_cast<int>(AppId::Count); a++) {
+      b += F("<option value=");
+      b += String(a);
+      if (i < cfg.app_sched_count && app == (uint8_t)a) b += F(" selected");
+      b += F(">");
+      b += appIdLabelZh(static_cast<AppId>(a));
+      b += F("</option>");
+    }
+    b += F("</select></label><label>界面<br><select name=s_view_");
+    b += String(i);
+    b += F("><option value=0");
+    if (view == 0) b += F(" selected");
+    b += F(">默认 / 天气实况</option><option value=1");
+    if (view == 1) b += F(" selected");
+    b += F(">天气·7日</option></select></label></div>");
+  }
+  b += F("<div class=btn-row><button type=submit>保存 App 时间表</button></div></form></section>");
+  sendHtml(NavTab::Schedule, b);
+}
+
+static void handleSchedulePost() {
+  const String action = g_server.arg("action");
+  if (action == "quiet") {
+    QuietSlot slots[QUIET_SLOT_MAX];
+    uint8_t n = 0;
+    for (int i = 0; i < QUIET_SLOT_MAX; i++) {
+      uint16_t st = 0, en = 0;
+      const String ks = String("q_start_") + i;
+      const String ke = String("q_end_") + i;
+      if (!scheduleParseHm(g_server.arg(ks), st)) continue;
+      if (!scheduleParseHm(g_server.arg(ke), en)) continue;
+      slots[n].start_min = st;
+      slots[n].end_min = en;
+      n++;
+    }
+    saveQuietSchedule(g_server.hasArg("quiet_en"), slots, n);
+    redirectOk("/schedule", "quiet");
+    return;
+  }
+  if (action == "appsched") {
+    AppSchedSlot slots[APP_SCHED_MAX];
+    uint8_t n = 0;
+    for (int i = 0; i < APP_SCHED_MAX; i++) {
+      uint16_t at = 0;
+      const String ka = String("s_at_") + i;
+      const String kp = String("s_app_") + i;
+      const String kv = String("s_view_") + i;
+      if (!scheduleParseHm(g_server.arg(ka), at)) continue;
+      const String app_s = g_server.arg(kp);
+      if (!app_s.length()) continue;
+      const int app = app_s.toInt();
+      if (app < 0 || app >= static_cast<int>(AppId::Count)) continue;
+      slots[n].at_min = at;
+      slots[n].app_id = (uint8_t)app;
+      slots[n].view = (uint8_t)g_server.arg(kv).toInt();
+      n++;
+    }
+    saveAppSchedule(g_server.hasArg("app_sched_en"), slots, n);
+    redirectOk("/schedule", "appsched");
+    return;
+  }
+
+  // refresh_all
+  {
+    const uint32_t wx = weatherRefreshSecFromDhm((uint32_t)g_server.arg("wx_d").toInt(),
+                                                (uint32_t)g_server.arg("wx_h").toInt(),
+                                                (uint32_t)g_server.arg("wx_m").toInt());
+    saveWeatherRefreshSec(wx);
+    saveWeatherRefreshEn(g_server.hasArg("wx_en"));
+  }
+  {
+    const uint32_t alb = weatherRefreshSecFromDhm((uint32_t)g_server.arg("alb_d").toInt(),
+                                                 (uint32_t)g_server.arg("alb_h").toInt(),
+                                                 (uint32_t)g_server.arg("alb_m").toInt());
+    saveAlbumRefreshSec(alb);
+    saveAlbumRefreshEn(g_server.hasArg("alb_en"));
+  }
+  {
+    const AppConfig &cfg = getAppConfig();
+    const uint32_t ch = weatherRefreshSecFromDhm((uint32_t)g_server.arg("ch_d").toInt(),
+                                                (uint32_t)g_server.arg("ch_h").toInt(),
+                                                (uint32_t)g_server.arg("ch_m").toInt());
+    saveChessSettings(cfg.chess_random, cfg.chess_levels, g_server.hasArg("ch_en"), ch);
+  }
+  {
+    const AppConfig &cfg = getAppConfig();
+    const uint32_t qt = weatherRefreshSecFromDhm((uint32_t)g_server.arg("qt_d").toInt(),
+                                                (uint32_t)g_server.arg("qt_h").toInt(),
+                                                (uint32_t)g_server.arg("qt_m").toInt());
+    saveQuoteSettings(cfg.quote_random, g_server.hasArg("qt_en"), qt);
+  }
+  redirectOk("/schedule", "refresh_all");
+}
+
 static void handleApiConfigGet() {
   g_server.send(200, "application/json", appConfigToJson(true));
 }
@@ -1367,7 +2243,7 @@ static void handleHelpGet() {
   String b;
   b += F("<section><h2>帮助</h2>"
          "<p class=hint style=margin:0>按键、电源与状态灯含义。长按上键约 1.5s 开配置网页；"
-         "长按下键约 3s 关机（深睡，再按下键唤醒）。</p></section>");
+         "长按下键约 2s 关机（深睡，再按下键唤醒）。</p></section>");
 
   b += F("<section><h2>LED 含义</h2>"
          "<p class=hint>板载状态灯（GPIO3，低电平点亮）。空闲默认熄灭；"
@@ -1388,9 +2264,9 @@ static void handleHelpGet() {
 
   row("led-anim-solid", "常亮", "按键按下期间灯一直亮着，松开才灭。", "BOOT / UP / DOWN 任一按下");
   row("led-anim-boot", "上电三闪", "快闪 3 下后熄灭，表示固件已启动（上电不刷墨水屏）。", "开机 / 深睡唤醒");
-  row("led-anim-ack", "长按确认两闪", "长按阈值到达时闪两下，可松手；随后执行对应动作。", "UP≈1.5s 开 Web · DOWN≈3s 关机");
+  row("led-anim-ack", "长按确认两闪", "长按阈值到达时闪两下，可松手；随后执行对应动作。", "UP≈1.5s 开 Web · DOWN≈2s 关机");
   row("led-anim-slow", "慢闪", "约 400ms 亮灭交替。", "正在连 WiFi / 启动配置网页");
-  row("led-anim-fast", "快闪", "约 120ms 亮灭交替。", "网络拉取等短时忙碌（如有）");
+  row("led-anim-fast", "快闪", "约 120ms 亮灭交替。", "HTTPS 拉待办 / 天气等请求中");
   row("led-anim-done", "刷完一闪", "全刷结束后短亮一下再灭；刷屏过程中不闪灯。", "切 App / BOOT 刷新 / 定时刷新完成");
   row("led-anim-double", "双脉冲", "两短亮一停，重复约 3 次后自动灭。", "配置 Web / 热点就绪提示");
   row("led-anim-error", "三短闪（失败）", "连续三下短亮，约 2s 内结束并熄灭。", "刷屏失败、开网页失败等");
@@ -1442,6 +2318,12 @@ static void registerRoutes() {
   g_server.on("/led", HTTP_GET, handleLedRedirect);
   g_server.on("/apps", HTTP_POST, handleAppsPost);
   g_server.on("/power", HTTP_POST, handlePowerPost);
+  g_server.on("/chess", HTTP_GET, handleChessGet);
+  g_server.on("/chess", HTTP_POST, handleChessPost);
+  g_server.on("/quote", HTTP_GET, handleQuoteGet);
+  g_server.on("/quote", HTTP_POST, handleQuotePost);
+  g_server.on("/schedule", HTTP_GET, handleScheduleGet);
+  g_server.on("/schedule", HTTP_POST, handleSchedulePost);
   g_server.on("/time", HTTP_POST, handleTimePost);
   g_server.on("/favicon.svg", HTTP_GET, handleFavicon);
   g_server.on("/wifi", HTTP_GET, handleWifiGet);
@@ -1457,6 +2339,7 @@ static void registerRoutes() {
   g_server.on("/errors/clear", HTTP_POST, handleErrorsClear);
   webAlbumRegisterRoutes(g_server);
   g_server.on("/api/config", HTTP_GET, handleApiConfigGet);
+  g_server.on("/api/device", HTTP_GET, handleApiDeviceGet);
 }
 
 bool webStart(bool force_ap, bool allow_ap_fallback) {

@@ -1,12 +1,9 @@
 #include "app_todo.h"
+#include "app_todo_store.h"
 #include "app_config.h"
 #include "app_font.h"
 #include "app_wifi.h"
-#include "app_battery.h"
-#include "app_header.h"
-#include "app_footer.h"
-#include "app_rtc.h"
-#include "app_version.h"
+#include "app_theme.h"
 #include "app_errorlog.h"
 
 #include <cstdio>
@@ -82,89 +79,62 @@ static void drawCheckbox(EpdSsd2683 &epd, int x, int y, bool done) {
   }
 }
 
-void todoDrawPage(EpdSsd2683 &epd, const DiaryDetail &diary, const char *status_line,
-                  const char *refreshed_at) {
-  epd.clear(EPD_WHITE);
+void todoDrawPage(EpdSsd2683 &epd, const DiaryDetail &diary) {
+  epd.clear(Theme::Bg);
 
   TodoItem items[TODO_ITEM_MAX];
   const int n = diary.ok ? todoParseContent(diary.content, items, TODO_ITEM_MAX) : 0;
-  int undone = 0;
-  for (int i = 0; i < n; i++) {
-    if (!items[i].done) undone++;
-  }
 
-  // Header + app slot n/N (near battery). chrome_left = indicator, keep status left of it.
-  const int chrome_left = headerDrawAppBar(epd, AppId::Todo, "TODO");
-  char line[48];
-  if (n > 0) {
-    snprintf(line, sizeof(line), "%d/%d open", undone, n);
-    epd.drawText(56, 7, line, EPD_YELLOW, EPD_BLACK);
-  }
-  if (status_line && status_line[0]) {
-    const int sw = (int)strlen(status_line) * 6;
-    const int sx = chrome_left - 6 - sw;
-    if (sx >= 100) epd.drawText(sx, 7, status_line, EPD_YELLOW, EPD_BLACK);
-  }
-
-  // Meta
-  int y = 28;
-  if (diary.title.length()) {
-    y = fontDrawTextWrapped(epd, 8, y, 384, 56, diary.title.c_str(), EPD_RED);
-  } else if (diary.date.length()) {
-    snprintf(line, sizeof(line), "%s", diary.date.c_str());
-    epd.drawText(8, y, line, EPD_BLACK);
-    y += 16;
-  }
-  // 刷新时间
-  if (refreshed_at && refreshed_at[0]) {
-    snprintf(line, sizeof(line), "刷新 %s", refreshed_at);
-    y = fontDrawTextWrapped(epd, 8, y, 384, y + 20, line, EPD_BLACK) + 1;
-  }
-  y += 3;  // 3px below title
-  epd.drawHLine(8, y, 384, EPD_BLACK);
-  y += 1 + 3;  // line + 3px above content
-
-  constexpr int footer_y = 276;
+  constexpr int kMargin = Theme::MarginX;
+  constexpr int kBottom = EpdSsd2683::kHeight - 4;
   constexpr int text_x = 26;
-  constexpr int box_x = 8;
-  constexpr int text_w = 400 - text_x - 8;
+  constexpr int box_x = kMargin;
+  constexpr int text_w = EpdSsd2683::kWidth - text_x - kMargin;
+
+  int y = kMargin;
+  // 标题（无 header；不画刷新时间）
+  if (diary.title.length()) {
+    y = fontDrawTextWrapped(epd, kMargin, y, 384, kMargin + 28, diary.title.c_str(), Theme::Alert);
+    y += 3;
+    epd.drawHLine(kMargin, y, 384, Theme::Fg);
+    y += 1 + 3;
+  }
 
   if (!diary.ok) {
-    y = fontDrawTextWrapped(epd, 8, y, 384, footer_y - 4, "错误详情", EPD_RED);
+    y = fontDrawTextWrapped(epd, kMargin, y, 384, kBottom, "错误详情", Theme::Alert);
     y += 4;
-    fontDrawTextWrapped(epd, 8, y, 384, footer_y - 4,
-                        diary.message.length() ? diary.message.c_str() : "(error)", EPD_BLACK);
+    fontDrawTextWrapped(epd, kMargin, y, 384, kBottom,
+                        diary.message.length() ? diary.message.c_str() : "(error)", Theme::Fg);
   } else if (n == 0) {
     if (diary.content.length()) {
-      // not todo-formatted; show raw
-      fontDrawTextWrapped(epd, 8, y, 384, footer_y - 4, diary.content.c_str(), EPD_BLACK);
+      fontDrawTextWrapped(epd, kMargin, y, 384, kBottom, diary.content.c_str(), Theme::Fg);
     } else {
-      fontDrawTextWrapped(epd, 8, y, 384, footer_y - 4, "(no - / = todo lines)", EPD_BLACK);
+      fontDrawTextWrapped(epd, kMargin, y, 384, kBottom, "(no - / = todo lines)", Theme::Fg);
     }
   } else {
+    constexpr int kTodoLineGap = 4;  // 折行行距
     for (int i = 0; i < n; i++) {
-      if (y + fontLineHeight() > footer_y - 4) {
-        fontDrawTextWrapped(epd, 8, y, 384, footer_y - 4, "...", EPD_RED);
+      if (y + fontLineHeight() > kBottom) {
+        fontDrawTextWrapped(epd, kMargin, y, 384, kBottom, "...", Theme::Alert);
         break;
       }
       const TodoItem &it = items[i];
       drawCheckbox(epd, box_x, y, it.done);
 
       if (it.content.length()) {
-        y = fontDrawTextWrapped(epd, text_x, y, text_w, footer_y - 4, it.content.c_str(), EPD_BLACK,
-                                EPD_WHITE, text_x, it.done, EPD_BLACK);
+        y = fontDrawTextWrapped(epd, text_x, y, text_w, kBottom, it.content.c_str(), Theme::Fg,
+                                Theme::Bg, text_x, it.done, Theme::Fg, kTodoLineGap);
       }
       // note: 2px below main todo text; red
-      if (it.note.length() && y + fontLineHeight() <= footer_y - 4) {
+      if (it.note.length() && y + fontLineHeight() <= kBottom) {
         y += 2;
-        y = fontDrawTextWrapped(epd, text_x, y, text_w, footer_y - 4, it.note.c_str(), EPD_RED,
-                                EPD_WHITE, text_x);
+        y = fontDrawTextWrapped(epd, text_x, y, text_w, kBottom, it.note.c_str(), Theme::Alert,
+                                Theme::Bg, text_x, false, Theme::Alert, kTodoLineGap);
       }
-      y += 4;  // 4px gap between todo items
+      y += 4;  // 条目间距
     }
   }
 
-  footerDraw(epd, "refresh");
   epd.display();
 }
 
@@ -175,54 +145,59 @@ bool todoRefreshAndDraw(EpdSsd2683 &epd) {
   }
 
   DiaryDetail d;
-  char status[24] = "fetch...";
-  char refreshed[24] = "";
 
-  auto failDraw = [&](const char *st) {
+  auto failDraw = [&]() {
     if (d.message.length()) errorLog("todo", d.message);
-    todoDrawPage(epd, d, st, nullptr);
+    todoDrawPage(epd, d);
     return true;  // 已刷错误页；勿 ErrorBurst
   };
+
+  const AppConfig &cfg = getAppConfig();
+
+  // 本机正文：不联网，直接画
+  if (cfg.todo_use_local) {
+    String local;
+    if (!todoLocalLoad(local) || local.isEmpty()) {
+      d.message = "本机待办为空。请在配置网页 /todo 填写正文，或改回网络日记。";
+      return failDraw();
+    }
+    d.ok = true;
+    d.title = "本机待办";
+    d.content = local;
+    d.category = "local";
+    d.message = "OK";
+    todoDrawPage(epd, d);
+    return true;
+  }
 
   if (!wifiIsStaConnected()) {
     if (!hasSavedWifiConfig()) {
       d.message = "无 WiFi 配置。长按上键打开配置网页（热点 Note4C-Carte）。";
-      return failDraw("no-wifi");
+      return failDraw();
     }
-    strncpy(status, "wifi...", sizeof(status) - 1);
     if (!wifiConnectSaved(18000)) {
       d.message = "WiFi 连接失败。长按上键打开热点配网，检查 SSID/密码。";
-      return failDraw("wifi-fail");
+      return failDraw();
     }
   }
 
   if (!diaryHasToken()) {
     d.message = "未登录 Portal。请在配置网页打开 /auth 登录。";
-    return failDraw("no-auth");
+    return failDraw();
   }
 
-  const AppConfig &cfg = getAppConfig();
   if (!cfg.diary_id[0]) {
     d.message = "diary_id 为空。请在 /auth 登录后选择待办日记。";
-    return failDraw("no-id");
+    return failDraw();
   }
 
   Serial.printf("[Todo] fetch diary %s\n", cfg.diary_id);
   if (!diaryFetchById(cfg.diary_id, d)) {
     if (!d.message.length()) d.message = "拉取待办失败";
     else d.message = String("拉取待办失败：") + d.message;
-    return failDraw("err");
+    return failDraw();
   }
 
-  // 刷新完成时刻
-  RtcDateTime now;
-  if (rtcRead(now)) {
-    snprintf(refreshed, sizeof(refreshed), "%02d-%02d %02d:%02d", now.month, now.day, now.hour,
-             now.minute);
-    snprintf(status, sizeof(status), "%02d:%02d", now.hour, now.minute);
-  } else {
-    snprintf(status, sizeof(status), "OK");
-  }
-  todoDrawPage(epd, d, status, refreshed[0] ? refreshed : nullptr);
+  todoDrawPage(epd, d);
   return true;
 }

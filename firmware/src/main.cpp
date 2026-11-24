@@ -6,7 +6,7 @@
  *   DOWN short(s)    → next app(s); multi-click within combo window skips N
  *   UP short(s)      → prev app(s); same combo window as BOOT/album
  *   UP hold ~1.5s    → config web
- *   DOWN hold ~3s    → power off
+ *   DOWN hold ~2s    → power off
  *   BOOT release     → in-app ONLY (never switches App)
  *
  * LED: 按键按下即亮、松开即灭；长按阈值到达时闪两下（可松手）；刷屏过程不亮，完成后一闪；慢闪连 WiFi；失败三短闪
@@ -31,6 +31,8 @@
 #include "app_album.h"
 #include "app_status.h"
 #include "app_chess.h"
+#include "app_quote.h"
+#include "app_schedule.h"
 #include "app_apps.h"
 #include "app_theme.h"
 #include "app_led.h"
@@ -47,7 +49,32 @@ static AppId g_app = AppId::Todo;
 static WeatherMode g_weather_mode = WeatherMode::Now;
 static int g_album_index = 0;
 static int g_chess_index = 0;
+static int g_quote_index = 0;
 static uint32_t g_ignore_keys_until = 0;
+
+// 相册前进：顺序 +1，乱序随机（尽量避开当前）
+static void albumAdvanceIndex(int &index, int steps) {
+  const int n = albumCountCached();
+  if (n <= 0) {
+    index = 0;
+    return;
+  }
+  if (index < 0) index = 0;
+  index %= n;
+  if (getAppConfig().album_random) {
+    if (n == 1) {
+      index = 0;
+      return;
+    }
+    int next = index;
+    for (int t = 0; t < 8 && next == index; t++) next = (int)(esp_random() % (uint32_t)n);
+    if (next == index) next = (index + 1) % n;
+    index = next;
+    return;
+  }
+  if (steps < 0) steps = 0;
+  index = (index + steps) % n;
+}
 
 static bool i2cAck(uint8_t addr) {
   Wire.beginTransmission(addr);
@@ -121,31 +148,6 @@ static int utf8TextWidth(const char *s) {
   return w;
 }
 
-// Web 路径以黄底黑框 tab 画出。返回 tab 区底边 y。
-static int drawWebPageTabs(int x, int y, int max_w) {
-  static const char *kTabs[] = {"状态", "设置", "WiFi", "鉴权", "待办", "天气", "相册", "错误", "帮助"};
-  constexpr int kPadX = 5;
-  constexpr int kPadY = 3;
-  constexpr int kGap = 4;
-  constexpr int kTh = 16 + kPadY * 2;
-  int cx = x;
-  int cy = y;
-  for (const char *label : kTabs) {
-    const int tw = utf8TextWidth(label);
-    const int twid = tw + kPadX * 2;
-    if (cx + twid > x + max_w && cx > x) {
-      cx = x;
-      cy += kTh + kGap;
-    }
-    epd.fillRect(cx, cy, twid, kTh, Theme::Accent);
-    epd.drawRect(cx, cy, twid, kTh, Theme::Fg);
-    fontDrawTextWrapped(epd, cx + kPadX, cy + kPadY, tw, cy + kPadY + 16, label, Theme::Fg,
-                        Theme::Accent);
-    cx += twid + kGap;
-  }
-  return cy + kTh;
-}
-
 static void drawConfigWebPage(bool ok) {
   if (!epd.ok()) return;
   epd.clear(Theme::Bg);
@@ -163,7 +165,9 @@ static void drawConfigWebPage(bool ok) {
   }
 
   constexpr int kGap = 3;
-  constexpr int kAfterBanner = 10;  // 黑块与下方内容
+  constexpr int kContentGap = 10;  // 与其它内容间隔
+  constexpr int kBannerTextGap = 5;  // 黑底两行文字间距
+  constexpr int kTipPad = 15;        // 提示信息内边距
   constexpr int kMaxY = Theme::FooterY - 4;
   constexpr int kPad = 8;
   constexpr int kBannerShiftX = 30;  // 图标+文案整体右移
@@ -179,17 +183,18 @@ static void drawConfigWebPage(bool ok) {
   webModeIconDraw(epd, icon_x, icon_y, ap, icon_sz, false);
   const int tx = icon_x + icon_sz + kIconTextGap;
   const int tw = 400 - tx - kPad;
-  // 模式名 + 地址两行，相对图标纵向居中
-  const int text_h = fontLineHeight() * 2;
+  // 模式名 + 地址两行，相对图标纵向居中；行间距 5px
+  const int text_h = fontLineHeight() * 2 + kBannerTextGap;
   int ty = icon_y + (icon_sz - text_h) / 2;
   if (ty < icon_y) ty = icon_y;
   ty = fontDrawTextWrapped(epd, tx, ty, tw, banner_y + banner_h, webModeName(), Theme::HeaderAccent,
                            Theme::HeaderBg);
+  ty += kBannerTextGap;
   snprintf(line, sizeof(line), "地址：%s", webUrl());
   fontDrawTextWrapped(epd, tx, ty, tw, banner_y + banner_h, line, Theme::HeaderFg, Theme::HeaderBg);
-  int y = banner_y + banner_h + kAfterBanner;
+  int y = banner_y + banner_h + kContentGap;
   if (ap) {
-    // 热点 / 密码：黄底黑框居中，标签等宽对齐；上下各 10px
+    // 热点 / 密码：黄底黑框居中，标签等宽对齐
     const int lh = fontLineHeight();
     constexpr int kBoxPadX = 14;
     constexpr int kBoxPadY = 8;
@@ -214,28 +219,27 @@ static void drawConfigWebPage(bool ok) {
     fontDrawTextWrapped(epd, text_x, row_y, label_w, row_y + lh, "密码", Theme::Fg, Theme::Accent);
     fontDrawTextWrapped(epd, text_x + label_w + kLabelGap, row_y, val_w + 4, row_y + lh, WIFI_AP_PASS,
                         Theme::Fg, Theme::Accent);
-    y = y + box_h + kAfterBanner;
+    y = y + box_h + kContentGap;
     y = fontDrawTextWrapped(epd, 8, y, 384, kMaxY, "手机连此热点后，用浏览器打开上面的地址", Theme::Fg) +
         kGap;
   } else {
     y = fontDrawTextWrapped(epd, 8, y, 384, kMaxY, "请与手机连同一 WiFi，浏览器打开上面的地址", Theme::Fg) +
         kGap;
   }
-  // 醒目提示：配置模式不计空闲关机
+  // 醒目提示：配置模式不计空闲关机（padding 15px，与上下内容 10px）
   {
-    constexpr int kTipH = 22;
-    epd.fillRect(8, y, 384, kTipH, Theme::Accent);
-    epd.drawRect(8, y, 384, kTipH, Theme::Fg);
-    fontDrawTextWrapped(epd, 16, y + 3, 368, y + kTipH, "当前模式不会自动关机", Theme::Fg,
-                        Theme::Accent);
-    y = y + kTipH + kAfterBanner;
+    const int tip_h = fontLineHeight() + kTipPad * 2;
+    epd.fillRect(8, y, 384, tip_h, Theme::Accent);
+    epd.drawRect(8, y, 384, tip_h, Theme::Fg);
+    fontDrawTextWrapped(epd, 8 + kTipPad, y + kTipPad, 384 - kTipPad * 2, y + tip_h,
+                        "当前模式不会自动关机", Theme::Fg, Theme::Accent);
+    y = y + tip_h + kContentGap;
   }
-  y = drawWebPageTabs(8, y + 2, 384) + 8;
   y = fontDrawTextWrapped(epd, 8, y, 384, kMaxY,
                           ap ? "长按上键：改用同 WiFi 站点" : "长按上键：改用 AP 模式", Theme::Fg) +
       kGap;
   y = fontDrawTextWrapped(epd, 8, y, 384, kMaxY, "BOOT 键：退出配置，返回应用", Theme::Fg) + kGap;
-  y = fontDrawTextWrapped(epd, 8, y, 384, kMaxY, "长按下键约 3 秒：关机；再按下键开机", Theme::Fg) + kGap;
+  y = fontDrawTextWrapped(epd, 8, y, 384, kMaxY, "长按下键约 2 秒：关机；再按下键开机", Theme::Fg) + kGap;
   const AppConfig &pcfg = getAppConfig();
   const uint32_t idle = pcfg.idle_off_sec;
   if (idle == 0) {
@@ -268,20 +272,18 @@ static bool showCurrentApp(bool refresh) {
       Serial.printf("[UI] weather mode=%s\n", weatherModeName(g_weather_mode));
       return weatherShowMode(epd, g_weather_mode);
     case AppId::Album: {
-      if (refresh) {
-        const int n = albumCountCached();
-        if (n > 0) g_album_index = (g_album_index + 1) % n;
-      }
+      if (refresh) albumAdvanceIndex(g_album_index, 1);
       return albumShow(epd, g_album_index);
     }
     case AppId::Status:
       return statusShow(epd);
     case AppId::Chess: {
-      if (refresh) {
-        const int n = chessEndgameCount();
-        if (n > 0) g_chess_index = (g_chess_index + 1) % n;
-      }
+      if (refresh) chessAdvanceIndex(g_chess_index, 1);
       return chessShow(epd, g_chess_index);
+    }
+    case AppId::Quote: {
+      if (refresh) quoteAdvanceIndex(g_quote_index, 1);
+      return quoteShow(epd, g_quote_index);
     }
     default:
       return false;
@@ -298,13 +300,15 @@ static void applyBootSkip(uint8_t n) {
     for (uint8_t i = 0; i < n; i++) g_weather_mode = weatherModeNext(g_weather_mode);
     Serial.printf("[UI] weather skip %u -> %s\n", (unsigned)n, weatherModeName(g_weather_mode));
   } else if (g_app == AppId::Album) {
-    const int count = albumCountCached();
-    if (count > 0) g_album_index = (g_album_index + (int)n) % count;
-    Serial.printf("[UI] album skip %u -> %d/%d\n", (unsigned)n, g_album_index, count);
+    for (uint8_t i = 0; i < n; i++) albumAdvanceIndex(g_album_index, 1);
+    Serial.printf("[UI] album skip %u -> %d/%d\n", (unsigned)n, g_album_index, albumCountCached());
   } else if (g_app == AppId::Chess) {
-    const int count = chessEndgameCount();
-    if (count > 0) g_chess_index = (g_chess_index + (int)n) % count;
-    Serial.printf("[UI] chess skip %u -> %d/%d\n", (unsigned)n, g_chess_index, count);
+    // 多跳时顺序累加；乱序模式仍每次随机
+    for (uint8_t i = 0; i < n; i++) chessAdvanceIndex(g_chess_index, 1);
+    Serial.printf("[UI] chess skip %u -> %d/%d\n", (unsigned)n, g_chess_index, chessPositionCount());
+  } else if (g_app == AppId::Quote) {
+    for (uint8_t i = 0; i < n; i++) quoteAdvanceIndex(g_quote_index, 1);
+    Serial.printf("[UI] quote skip %u -> %d/%d\n", (unsigned)n, g_quote_index, quoteCount());
   }
 }
 
@@ -430,6 +434,16 @@ void setup() {
   }
 
   fontBegin();
+
+  // ErrLog 记时间会读 RTC，须先恢复 I2C，否则 Wire lock 报错
+  i2cBusRecover();
+  digitalWrite(PIN_AUDIO_PWR, HIGH);
+  digitalWrite(PIN_NFC_PWR, HIGH);
+  delay(30);
+  Serial.printf("[I2C] RTC=%s NFC=%s ES=%s\n", i2cAck(I2C_ADDR_RTC) ? "OK" : "--",
+                i2cAck(I2C_ADDR_NFC) ? "OK" : "--", i2cAck(I2C_ADDR_ES8311) ? "OK" : "--");
+  rtcBegin();  // 从 PCF8563 灌入系统时间；复位后下次联网会再 NTP 一次
+
   errorLogBegin();
   {
     const esp_reset_reason_t rr = esp_reset_reason();
@@ -439,14 +453,6 @@ void setup() {
       errorLog("sys", "上次复位：Panic（常见于栈溢出）。");
     }
   }
-
-  i2cBusRecover();
-  digitalWrite(PIN_AUDIO_PWR, HIGH);
-  digitalWrite(PIN_NFC_PWR, HIGH);
-  delay(30);
-  Serial.printf("[I2C] RTC=%s NFC=%s ES=%s\n", i2cAck(I2C_ADDR_RTC) ? "OK" : "--",
-                i2cAck(I2C_ADDR_NFC) ? "OK" : "--", i2cAck(I2C_ADDR_ES8311) ? "OK" : "--");
-  rtcBegin();  // 从 PCF8563 灌入系统时间；复位后下次联网会再 NTP 一次
 
   const bool timer_wake = powerWokeFromRtcAlarm();
   Serial.printf("[BOOT] wakeup_cause=%d timer_wake=%d af=%d int=%d\n",
@@ -473,12 +479,22 @@ void setup() {
   }
   powerNotifyForegroundApp(g_app);
 
-  // 定时醒：到期才刷；早醒（INT 未抬/同一分钟）只再睡，不翻页
+  // 定时醒：到期才刷；早醒（INT 未抬/同一分钟）只再睡，不翻页；静默时段跳过动作
   if (timer_wake) {
     rtcAlarmClear();
     bool due = true;
-    if (g_app == AppId::Album) due = albumAutoRefreshDue();
-    else if (g_app == AppId::Weather) due = weatherAutoRefreshDue();
+    if (scheduleInQuietNow()) {
+      due = false;
+      Serial.println("[PWR] timer wake in quiet -> skip");
+    } else if (g_app == AppId::Album) {
+      due = albumAutoRefreshDue();
+    } else if (g_app == AppId::Weather) {
+      due = weatherAutoRefreshDue();
+    } else if (g_app == AppId::Chess) {
+      due = chessAutoRefreshDue();
+    } else if (g_app == AppId::Quote) {
+      due = quoteAutoRefreshDue();
+    }
     Serial.printf("[PWR] timer job app=%s due=%d\n", appIdName(g_app), (int)due);
     if (due) {
       {
@@ -486,10 +502,13 @@ void setup() {
         if (now >= 1700000000) {
           if (g_app == AppId::Album) saveAlbumLastUnix((uint32_t)now);
           else if (g_app == AppId::Weather) saveWeatherLastUnix((uint32_t)now);
+          else if (g_app == AppId::Chess) saveChessLastUnix((uint32_t)now);
+          else if (g_app == AppId::Quote) saveQuoteLastUnix((uint32_t)now);
         }
       }
       epd.suppressInterruptOnce();
-      const bool ok = showCurrentApp(g_app == AppId::Album);
+      const bool ok =
+          showCurrentApp(g_app == AppId::Album || g_app == AppId::Chess || g_app == AppId::Quote);
       Serial.printf("[PWR] timer refresh ok=%d -> sleep\n", (int)ok);
       persistUi();
     } else {
@@ -572,8 +591,33 @@ void loop() {
     finishAction(sr == InteractiveShowResult::Ok);
   };
 
-  // App 定时任务：仅当「停留在对应 App」时才跑（配置页 / 按键忙碌不计）
-  if (!in_web && !busy && !boot && !up) {
+  // App 定时任务：仅当「停留在对应 App」时才跑（配置页 / 按键忙碌 / 静默时段不计）
+  if (!in_web && !busy && !boot && !up && !scheduleInQuietNow()) {
+    // 每日 App 时间表：到点切到对应 App/界面
+    {
+      AppId want = g_app;
+      uint8_t view = 0;
+      if (scheduleActiveApp(want, view) && want != g_app) {
+        busy = true;
+        Serial.printf("[UI] schedule switch -> %s view=%u\n", appIdName(want), (unsigned)view);
+        g_app = want;
+        if (g_app == AppId::Weather) {
+          g_weather_mode = (view == 1) ? WeatherMode::Week7 : WeatherMode::Now;
+        }
+        runShow(false);
+        return;
+      }
+      if (want == g_app && g_app == AppId::Weather) {
+        const WeatherMode wm = (view == 1) ? WeatherMode::Week7 : WeatherMode::Now;
+        if (wm != g_weather_mode) {
+          busy = true;
+          g_weather_mode = wm;
+          Serial.printf("[UI] schedule weather view -> %s\n", weatherModeName(g_weather_mode));
+          runShow(false);
+          return;
+        }
+      }
+    }
     if (g_app == AppId::Weather && weatherAutoRefreshDue()) {
       busy = true;
       Serial.printf("[UI] weather auto-refresh (every %u s)\n",
@@ -590,6 +634,28 @@ void loop() {
         if (now >= 1700000000) saveAlbumLastUnix((uint32_t)now);  // 先占槽，防连刷
       }
       runShow(true);  // 翻下一张
+      return;
+    }
+    if (g_app == AppId::Chess && chessAutoRefreshDue()) {
+      busy = true;
+      Serial.printf("[UI] chess auto-advance (every %u s)\n",
+                    (unsigned)getAppConfig().chess_refresh_sec);
+      {
+        const time_t now = time(nullptr);
+        if (now >= 1700000000) saveChessLastUnix((uint32_t)now);
+      }
+      runShow(true);  // 下一局
+      return;
+    }
+    if (g_app == AppId::Quote && quoteAutoRefreshDue()) {
+      busy = true;
+      Serial.printf("[UI] quote auto-advance (every %u s)\n",
+                    (unsigned)getAppConfig().quote_refresh_sec);
+      {
+        const time_t now = time(nullptr);
+        if (now >= 1700000000) saveQuoteLastUnix((uint32_t)now);
+      }
+      runShow(true);
       return;
     }
     if (g_app == AppId::Calendar && calendarAutoRefreshDue()) {

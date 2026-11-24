@@ -15,10 +15,8 @@ struct TodoItem {
 // Returns count; unfinished first, then finished.
 int todoParseContent(const String &content, TodoItem *out, int max_n);
 
-// Draw diary content as a todo / note page on the e-paper.
-// refreshed_at：本次拉取完成时间；为空则不画刷新时间。
-void todoDrawPage(EpdSsd2683 &epd, const DiaryDetail &diary, const char *status_line = nullptr,
-                  const char *refreshed_at = nullptr);
+// 全屏绘制待办（无 header / footer，不显示刷新时间）。
+void todoDrawPage(EpdSsd2683 &epd, const DiaryDetail &diary);
 
 // Connect (if needed), fetch configured diary id, draw. Returns false on soft failure.
 bool todoRefreshAndDraw(EpdSsd2683 &epd);

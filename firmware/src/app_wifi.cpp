@@ -33,7 +33,7 @@ static bool tryConnectOne(const char *ssid, const char *password, uint32_t timeo
       WiFi.begin(ssid, password ? password : "");
       next_retry = millis() + kRetryMs;
     }
-    powerPoll();  // allow DOWN 3s power-off while connecting
+    powerPoll();  // allow DOWN 2s power-off while connecting
     ledUpdate();
     delay(100);
   }
@@ -43,6 +43,9 @@ static bool tryConnectOne(const char *ssid, const char *password, uint32_t timeo
 bool wifiConnectSaved(uint32_t timeout_ms) {
   const AppConfig &cfg = getAppConfig();
   if (cfg.wifi_count <= 0) return false;
+
+  // 连网过程慢闪（成功后由拉数快闪 / 结束闪接棒）
+  ledSet(LedPattern::BlinkSlow);
 
   // Prefer active profile first
   int order[WIFI_PROFILE_MAX];

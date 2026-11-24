@@ -1,6 +1,7 @@
 #include "app_power.h"
 #include "app_battery.h"
 #include "app_config.h"
+#include "app_schedule.h"
 #include "app_rtc.h"
 #include "board.h"
 #include "app_led.h"
@@ -293,7 +294,7 @@ time_t powerNextWakeUnix(AppId app) {
       saveWeatherLastUnix((uint32_t)now);
       last = (uint32_t)now;
     }
-    return (time_t)last + (time_t)iv;
+    return scheduleClampWakeOutOfQuiet((time_t)last + (time_t)iv);
   }
 
   if (app == AppId::Album) {
@@ -306,7 +307,33 @@ time_t powerNextWakeUnix(AppId app) {
       saveAlbumLastUnix((uint32_t)now);
       last = (uint32_t)now;
     }
-    return (time_t)last + (time_t)iv;
+    return scheduleClampWakeOutOfQuiet((time_t)last + (time_t)iv);
+  }
+
+  if (app == AppId::Chess) {
+    const AppConfig &cfg = getAppConfig();
+    if (!cfg.chess_refresh_en) return 0;
+    const uint32_t iv = cfg.chess_refresh_sec;
+    if (iv < 60) return 0;
+    uint32_t last = loadChessLastUnix();
+    if (last == 0 || (time_t)last + (time_t)iv <= now) {
+      saveChessLastUnix((uint32_t)now);
+      last = (uint32_t)now;
+    }
+    return scheduleClampWakeOutOfQuiet((time_t)last + (time_t)iv);
+  }
+
+  if (app == AppId::Quote) {
+    const AppConfig &cfg = getAppConfig();
+    if (!cfg.quote_refresh_en) return 0;
+    const uint32_t iv = cfg.quote_refresh_sec;
+    if (iv < 60) return 0;
+    uint32_t last = loadQuoteLastUnix();
+    if (last == 0 || (time_t)last + (time_t)iv <= now) {
+      saveQuoteLastUnix((uint32_t)now);
+      last = (uint32_t)now;
+    }
+    return scheduleClampWakeOutOfQuiet((time_t)last + (time_t)iv);
   }
 
   return 0;
@@ -461,7 +488,7 @@ void powerPoll(bool latch_short) {
       g_down_since = millis();
       g_down_long_done = false;
     }
-    if (!g_down_long_done && (millis() - g_down_since >= 3000)) {
+    if (!g_down_long_done && (millis() - g_down_since >= 2000)) {
       g_down_long_done = true;
       g_down_clicks = 0;
       ledAckFlash();
@@ -473,7 +500,7 @@ void powerPoll(bool latch_short) {
   // release
   if (g_down_since != 0 && !g_down_long_done) {
     const uint32_t held = millis() - g_down_since;
-    if (latch_short && held >= 30 && held < 3000) {
+    if (latch_short && held >= 30 && held < 2000) {
       if (g_down_clicks < 40) g_down_clicks++;
       g_down_last_ms = millis();
     }

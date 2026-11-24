@@ -12,7 +12,7 @@ void powerBegin();
 // 关机前用于计算闹钟的前台 App（main 在切 App / setup 时更新）。
 void powerNotifyForegroundApp(AppId id);
 
-// Call often (loop + blocking waits). If DOWN held ~3s → soft off (deep sleep).
+// Call often (loop + blocking waits). If DOWN held ~2s → soft off (deep sleep).
 // latch_short=true counts short DOWN/UP releases into combo bursts.
 // EPD interrupt path: disarm until release, then latch_short=true so new keys abort.
 void powerPoll(bool latch_short = true);

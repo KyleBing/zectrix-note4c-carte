@@ -29,10 +29,40 @@ static int utf8Len(const char *s) {
   return n;
 }
 
-// label 占 4 字宽、右对齐；CJK=16px、ASCII=8px，缺的用半角空格补齐
+// 拷贝下一个 UTF-8 字符到 dst，返回字节数；失败返回 0
+static int copyUtf8Char(char *dst, size_t dst_n, const char *s) {
+  if (!dst || dst_n < 2 || !s || !s[0]) return 0;
+  const unsigned char c = (unsigned char)s[0];
+  int nbytes = 1;
+  if ((c & 0x80) == 0) nbytes = 1;
+  else if ((c & 0xE0) == 0xC0) nbytes = 2;
+  else if ((c & 0xF0) == 0xE0) nbytes = 3;
+  else if ((c & 0xF8) == 0xF0) nbytes = 4;
+  else return 0;
+  if ((size_t)nbytes + 1 > dst_n) return 0;
+  for (int i = 0; i < nbytes; ++i) {
+    if (!s[i]) return 0;
+    dst[i] = s[i];
+  }
+  dst[nbytes] = '\0';
+  return nbytes;
+}
+
+// label 占 4 字宽：二字中间插两个全角空格（固　　件）；其它仍右对齐半角空格补齐
 static void formatLabel(char *out, size_t n, const char *k) {
   constexpr int kField = 4;
+  if (!k) k = "";
   const int len = utf8Len(k);
+  if (len == 2) {
+    char a[8], b[8];
+    const int na = copyUtf8Char(a, sizeof(a), k);
+    const int nb = na ? copyUtf8Char(b, sizeof(b), k + na) : 0;
+    if (na && nb) {
+      // U+3000 IDEOGRAPHIC SPACE ×2
+      snprintf(out, n, "%s\xE3\x80\x80\xE3\x80\x80%s", a, b);
+      return;
+    }
+  }
   int missing = kField - len;
   if (missing < 0) missing = 0;
   // 每个缺字补 2 个半角空格（对齐到汉字宽）
@@ -40,7 +70,7 @@ static void formatLabel(char *out, size_t n, const char *k) {
   const int pad_n = missing * 2;
   for (int i = 0; i < pad_n && i < (int)sizeof(pad) - 1; ++i) pad[i] = ' ';
   pad[pad_n < (int)sizeof(pad) ? pad_n : (int)sizeof(pad) - 1] = '\0';
-  snprintf(out, n, "%s%s", pad, k ? k : "");
+  snprintf(out, n, "%s%s", pad, k);
 }
 
 // 字库为 GB2312：避免中间点等非常用符号，改用 ASCII 分隔
@@ -194,7 +224,41 @@ bool statusShow(EpdSsd2683 &epd) {
       y = drawKv(epd, y, "相册定时", val, Theme::Alert);
     }
   }
+  {
+    if (!cfg.chess_refresh_en) {
+      y = drawKv(epd, y, "象棋定时", "关");
+    } else {
+      uint32_t d = 0, h = 0, m = 0;
+      weatherRefreshToDhm(cfg.chess_refresh_sec, d, h, m);
+      snprintf(val, sizeof(val), "开 %u 天 %u 时 %u 分", (unsigned)d, (unsigned)h, (unsigned)m);
+      y = drawKv(epd, y, "象棋定时", val, Theme::Alert);
+    }
+    y = drawKv(epd, y, "象棋顺序", cfg.chess_random ? "乱序" : "顺序");
+    y = drawKv(epd, y, "相册顺序", cfg.album_random ? "乱序" : "顺序");
+  }
+  {
+    if (!cfg.quote_refresh_en) {
+      y = drawKv(epd, y, "名言定时", "关");
+    } else {
+      uint32_t d = 0, h = 0, m = 0;
+      weatherRefreshToDhm(cfg.quote_refresh_sec, d, h, m);
+      snprintf(val, sizeof(val), "开 %u 天 %u 时 %u 分", (unsigned)d, (unsigned)h, (unsigned)m);
+      y = drawKv(epd, y, "名言定时", val, Theme::Alert);
+    }
+  }
   y = drawKv(epd, y, "日历刷新", "跨天自动(停在日历时)");
+  if (cfg.quiet_en && cfg.quiet_count > 0) {
+    snprintf(val, sizeof(val), "开 %u 段", (unsigned)cfg.quiet_count);
+    y = drawKv(epd, y, "静默时段", val, Theme::Alert);
+  } else {
+    y = drawKv(epd, y, "静默时段", "关");
+  }
+  if (cfg.app_sched_en && cfg.app_sched_count > 0) {
+    snprintf(val, sizeof(val), "开 %u 点", (unsigned)cfg.app_sched_count);
+    y = drawKv(epd, y, "App时间表", val, Theme::Alert);
+  } else {
+    y = drawKv(epd, y, "App时间表", "关");
+  }
 
   if (cfg.idle_off_sec == 0) {
     y = drawKv(epd, y, "空闲关机", "关");

@@ -149,6 +149,8 @@ static bool portalWeatherGet(const char *path_and_query, JsonDocument &doc, Stri
   const String url = joinUrl(cfg.portal_base_url, path_and_query);
   Serial.printf("[Weather] GET %s heap=%u\n", path_and_query, (unsigned)ESP.getFreeHeap());
 
+  ledSet(LedPattern::BlinkFast);  // HTTPS 拉数快闪（weatherPump 里 ledUpdate）
+
   std::unique_ptr<WiFiClientSecure> client(new WiFiClientSecure());
   if (!client) {
     err = "client alloc failed";

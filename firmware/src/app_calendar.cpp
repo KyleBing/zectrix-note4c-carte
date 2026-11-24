@@ -152,7 +152,7 @@ bool calendarShow(EpdSsd2683 &epd) {
 
   const bool monday_first = getAppConfig().week_start_monday;
 
-  // 顶栏黑底星期行（+4px），文字垂直居中；日期格吃满剩余高度
+  // 顶栏白底星期行，平日黑 / 六日红；日期格吃满剩余高度
   constexpr int head_h = 30;  // 原 26 + 4
   constexpr int grid_left = Theme::MarginX;
   constexpr int grid_w = 400 - Theme::MarginX * 2;
@@ -177,12 +177,12 @@ bool calendarShow(EpdSsd2683 &epd) {
   static const char *kWdMon[] = {"一", "二", "三", "四", "五", "六", "日"};
   const char **kWd = monday_first ? kWdMon : kWdSun;
 
-  epd.fillRect(0, 0, EpdSsd2683::kWidth, head_h, Theme::HeaderBg);
+  epd.fillRect(0, 0, EpdSsd2683::kWidth, head_h, Theme::Bg);
   for (int c = 0; c < cols; c++) {
     const int cx = grid_left + c * cell_w + cell_w / 2;
     const bool weekend = monday_first ? (c >= 5) : (c == 0 || c == 6);
     fontDrawTextWrapped(epd, cx - 8, wd_y, 16, wd_y + wd_text_h, kWd[c],
-                        weekend ? Theme::Accent : Theme::HeaderFg, Theme::HeaderBg);
+                        weekend ? Theme::Alert : Theme::Fg, Theme::Bg);
   }
 
   const int dim = daysInMonth(now.year, now.month);
