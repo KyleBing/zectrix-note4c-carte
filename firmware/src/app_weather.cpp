@@ -12,7 +12,14 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
+// platform 7: esp32s3/rom/miniz.h；platform 8+ Arduino-ESP32 3.x: 扁平 miniz.h
+#if __has_include("esp32s3/rom/miniz.h")
 #include "esp32s3/rom/miniz.h"
+#elif __has_include("miniz.h")
+#include "miniz.h"
+#else
+#error "ESP-ROM miniz.h not found (need tinfl for QWeather gzip)"
+#endif
 #include <cmath>
 #include <cstdio>
 #include <cstring>
