@@ -98,11 +98,13 @@ python3 tools/album_preview.py
 整片 `0x1000000`（16 MiB）。
 ## 五、Release
 
+固件 `APP_VERSION`（`firmware/include/app_version.h`）须与 git tag **同号**：tag `v0.1.7` ↔ `APP_VERSION "0.1.7"`。  
 推送 `v*` tag 后，GitHub Actions 会编译固件、发布 Release，并触发文档部署。
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+# 先改 APP_VERSION，再打同号 tag
+git tag -a v0.1.7 -m "Carte v0.1.7"
+git push origin v0.1.7
 ```
 
 ## 六、仓库
