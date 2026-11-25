@@ -134,3 +134,40 @@ void wifiRadioOff() {
     WiFi.mode(WIFI_OFF);
   }
 }
+
+bool wifiPrepareSta(uint32_t timeout_ms) {
+  WiFi.setSleep(false);
+  if (wifiIsStaConnected() && (uint32_t)WiFi.localIP() != 0) return true;
+  if (!hasSavedWifiConfig()) return false;
+  return wifiConnectSaved(timeout_ms);
+}
+
+bool wifiForceReconnect(uint32_t timeout_ms) {
+  Serial.printf("[WiFi] force reconnect (status=%d ip=%s)\n", (int)WiFi.status(),
+                WiFi.localIP().toString().c_str());
+  WiFi.setSleep(false);
+  if (WiFi.getMode() != WIFI_OFF) {
+    WiFi.disconnect(false);
+    delay(120);
+  }
+  return wifiConnectSaved(timeout_ms);
+}
+
+bool wifiResolveHost(const char *host, IPAddress &out, int tries) {
+  out = IPAddress((uint32_t)0);
+  if (!host || !host[0] || tries < 1) return false;
+  WiFi.setSleep(false);
+  for (int i = 0; i < tries; i++) {
+    IPAddress ip;
+    if (WiFi.hostByName(host, ip) && (uint32_t)ip != 0) {
+      out = ip;
+      if (i > 0) Serial.printf("[WiFi] DNS ok %s -> %s (try %d)\n", host, ip.toString().c_str(), i + 1);
+      return true;
+    }
+    Serial.printf("[WiFi] DNS fail %s try=%d/%d status=%d\n", host, i + 1, tries, (int)WiFi.status());
+    delay(250);
+    powerPoll(false);
+    ledUpdate();
+  }
+  return false;
+}

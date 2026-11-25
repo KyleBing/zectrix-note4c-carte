@@ -11,6 +11,9 @@ static constexpr int QW_HOST_MAX = 80;
 static constexpr int QW_KEY_MAX = 64;
 static constexpr int QW_LOC_ID_MAX = 16;
 static constexpr int QW_LOC_NAME_MAX = 48;
+// 天气数据源：Portal 代理（JWT）/ 和风普通 API Key（非 JWT）
+static constexpr uint8_t QW_SRC_PORTAL = 0;
+static constexpr uint8_t QW_SRC_APIKEY = 1;
 static constexpr int QUIET_SLOT_MAX = 6;
 static constexpr int APP_SCHED_MAX = 12;
 
@@ -59,9 +62,11 @@ struct AppConfig {
   // 待办：true=用本机正文（LittleFS），false=拉 Portal 日记
   bool todo_use_local;
 
-  // 天气：设备只存位置；和风 JWT/Key 在 Portal-go 服务端
-  // host/key 字段保留兼容旧配置，设备端请求不再使用
+  // 天气：两种数据源可切换
+  // QW_SRC_PORTAL：经 Portal 代理，用登录 JWT；和风密钥在服务器
+  // QW_SRC_APIKEY：设备和风普通 API（Host + Key 查询参数，非 JWT）
   bool qweather_enabled;
+  uint8_t qweather_source;  // QW_SRC_PORTAL / QW_SRC_APIKEY
   char qweather_host[QW_HOST_MAX];
   char qweather_key[QW_KEY_MAX];
   char qweather_location_id[QW_LOC_ID_MAX];
@@ -106,9 +111,10 @@ bool savePortalToken(const char *token);
 bool savePortalBaseUrl(const char *url);
 bool saveDiaryId(const char *id);
 
-bool saveQWeatherConfig(bool enabled, const char *host, const char *key, const char *loc_id,
-                        const char *loc_name);
+bool saveQWeatherConfig(bool enabled, uint8_t source, const char *host, const char *key,
+                        const char *loc_id, const char *loc_name);
 bool qweatherConfigured();
+bool qweatherSourceIsApiKey();
 bool saveWeatherRefreshEn(bool en);
 // 间隔钳到 [60, 365 天]；开关关闭时仍可改间隔
 bool saveWeatherRefreshSec(uint32_t sec);

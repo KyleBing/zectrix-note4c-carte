@@ -9,13 +9,16 @@
 #include "app_gfx_icon.h"
 
 #include <HTTPClient.h>
+#include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
+#include "esp32s3/rom/miniz.h"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <memory>
+#include <vector>
 
 static const char *kRenewHeader = "X-Access-Token";
 static constexpr size_t kWeatherJsonCap = 48 * 1024;
@@ -120,98 +123,300 @@ static void filterPortalMeta(JsonDocument &filter) {
 }
 
 static bool ensureWifi(String &err) {
-  if (wifiIsStaConnected()) return true;
+  // 关 sleep；长刷屏后仍可能假连，后面 HTTPS 失败会再 force reconnect
+  if (wifiPrepareSta(18000)) return true;
   if (!hasSavedWifiConfig()) {
     err = "No WiFi. hold UP = config web";
     return false;
   }
-  if (!wifiConnectSaved(18000)) {
-    err = "WiFi connect failed";
+  err = "WiFi connect failed";
+  return false;
+}
+
+// 从 https://host/path 取出 host（供 DNS 预热）
+static String weatherUrlHost(const String &url) {
+  int start = 0;
+  if (url.startsWith("https://")) start = 8;
+  else if (url.startsWith("http://")) start = 7;
+  const int slash = url.indexOf('/', start);
+  if (slash < 0) return url.substring(start);
+  return url.substring(start, slash);
+}
+
+static bool weatherWarmDns(const String &url, String &err) {
+  const String host = weatherUrlHost(url);
+  IPAddress ip;
+  if (wifiResolveHost(host.c_str(), ip, 3)) return true;
+  Serial.printf("[Weather] DNS dead, force WiFi reconnect for %s\n", host.c_str());
+  if (!wifiForceReconnect(12000)) {
+    err = String("WiFi reconnect failed (DNS ") + host + ")";
     return false;
   }
+  if (wifiResolveHost(host.c_str(), ip, 3)) return true;
+  err = String("DNS fail ") + host;
+  return false;
+}
+
+// 旧公共主机：geo 与天气分域；新 API Host 则同一主机。
+static String weatherDirectBase(const AppConfig &cfg, bool for_geo) {
+  String host = cfg.qweather_host;
+  if (for_geo && (host == "devapi.qweather.com" || host == "api.qweather.com")) {
+    host = "geoapi.qweather.com";
+  }
+  return String("https://") + host;
+}
+
+// 跳过 gzip 头，返回 deflate 载荷起点；失败返回 nullptr。
+static const uint8_t *gzipSkipHeader(const uint8_t *src, size_t src_len, size_t &deflate_len) {
+  deflate_len = 0;
+  if (!src || src_len < 18 || src[0] != 0x1f || src[1] != 0x8b || src[2] != 8) return nullptr;
+  const uint8_t flags = src[3];
+  size_t pos = 10;
+  if (flags & 4) {  // FEXTRA
+    if (pos + 2 > src_len) return nullptr;
+    const size_t xlen = (size_t)src[pos] | ((size_t)src[pos + 1] << 8);
+    pos += 2 + xlen;
+  }
+  if (flags & 8) {  // FNAME
+    while (pos < src_len && src[pos]) pos++;
+    if (pos >= src_len) return nullptr;
+    pos++;
+  }
+  if (flags & 16) {  // FCOMMENT
+    while (pos < src_len && src[pos]) pos++;
+    if (pos >= src_len) return nullptr;
+    pos++;
+  }
+  if (flags & 2) {  // FHCRC
+    if (pos + 2 > src_len) return nullptr;
+    pos += 2;
+  }
+  if (src_len < pos + 8) return nullptr;  // 尾部 CRC32 + ISIZE
+  deflate_len = src_len - pos - 8;
+  return src + pos;
+}
+
+// 和风常返回 gzip。tinfl_decompress_mem_to_mem 会把 ~30KB decompressor 放栈上，
+// Web 回调已在 loopTask 深栈里，必炸 canary —— decompressor / 输出缓冲一律上堆。
+static bool gunzipPayload(const uint8_t *src, size_t src_len, String &out, String &err) {
+  size_t deflate_len = 0;
+  const uint8_t *deflate = gzipSkipHeader(src, src_len, deflate_len);
+  if (!deflate || deflate_len == 0) {
+    err = "bad gzip header";
+    return false;
+  }
+  // gzip 尾 ISIZE = 未压缩长度（模 2^32）
+  const uint32_t isize = (uint32_t)src[src_len - 4] | ((uint32_t)src[src_len - 3] << 8) |
+                         ((uint32_t)src[src_len - 2] << 16) | ((uint32_t)src[src_len - 1] << 24);
+  size_t out_cap = isize ? (size_t)isize : (deflate_len * 4);
+  if (out_cap < 256) out_cap = 256;
+  if (out_cap > kWeatherJsonCap) out_cap = kWeatherJsonCap;
+
+  std::unique_ptr<uint8_t[]> plain(new (std::nothrow) uint8_t[out_cap]);
+  std::unique_ptr<tinfl_decompressor> decomp(new (std::nothrow) tinfl_decompressor());
+  if (!plain || !decomp) {
+    err = "gunzip OOM";
+    return false;
+  }
+  tinfl_init(decomp.get());
+  size_t in_sz = deflate_len;
+  size_t out_sz = out_cap;  // 入：容量；成功返回后：已写出字节数（同 tinfl_decompress_mem_to_mem）
+  const tinfl_status st = tinfl_decompress(
+      decomp.get(), deflate, &in_sz, plain.get(), plain.get(), &out_sz,
+      TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
+  if (st != TINFL_STATUS_DONE || out_sz == 0 || out_sz > out_cap) {
+    err = String("tinfl st=") + (int)st + " wrote=" + (int)out_sz;
+    return false;
+  }
+  out = "";
+  out.reserve(out_sz);
+  for (size_t i = 0; i < out_sz; i++) out += (char)plain[i];
   return true;
 }
 
-// GET portal /weather/... with Bearer. Stream+filter，避免整包 body 再拷进 JsonDocument。
-static bool portalWeatherGet(const char *path_and_query, JsonDocument &doc, String &err,
-                             const JsonDocument *filter = nullptr) {
+// GET 天气：Portal（Bearer JWT）或和风普通 API Key（query key=，非 JWT）。
+// Stream+filter，避免整包 body 再拷进 JsonDocument；gzip 时再整包解压。
+static bool weatherHttpGet(const char *path_and_query, JsonDocument &doc, String &err,
+                           const JsonDocument *filter = nullptr, bool for_geo = false) {
   err = "";
   const AppConfig &cfg = getAppConfig();
-  if (!cfg.portal_base_url[0]) {
-    err = "portal base_url empty";
-    return false;
-  }
-  if (!cfg.portal_token[0]) {
-    err = "not logged in. Open web /auth";
-    return false;
+  const bool api_key = qweatherSourceIsApiKey();
+
+  String path = path_and_query ? path_and_query : "";
+  String url;
+  if (api_key) {
+    if (!cfg.qweather_host[0]) {
+      err = "qweather host empty. Open web /weather";
+      return false;
+    }
+    if (!cfg.qweather_key[0]) {
+      err = "qweather key empty. Open web /weather";
+      return false;
+    }
+    // 普通 API：查询参数 key=...（非 JWT Authorization）
+    path += (path.indexOf('?') >= 0) ? "&key=" : "?key=";
+    path += cfg.qweather_key;
+    url = joinUrl(weatherDirectBase(cfg, for_geo).c_str(), path.c_str());
+  } else {
+    if (!cfg.portal_base_url[0]) {
+      err = "portal base_url empty";
+      return false;
+    }
+    if (!cfg.portal_token[0]) {
+      err = "not logged in. Open web /auth";
+      return false;
+    }
+    url = joinUrl(cfg.portal_base_url, path.c_str());
   }
 
-  const String url = joinUrl(cfg.portal_base_url, path_and_query);
-  Serial.printf("[Weather] GET %s heap=%u\n", path_and_query, (unsigned)ESP.getFreeHeap());
+  Serial.printf("[Weather] GET %s src=%s heap=%u\n", path_and_query,
+                api_key ? "apikey" : "portal", (unsigned)ESP.getFreeHeap());
 
-  ledSet(LedPattern::BlinkFast);  // HTTPS 拉数快闪（weatherPump 里 ledUpdate）
+  // HTTPS 拉数快闪；函数返回前必须灭灯，否则会泄漏进随后 ~16s 全刷（busy 里仍 ledUpdate）
+  struct ScopeLedOff {
+    ~ScopeLedOff() { ledOff(); }
+  } scope_led_off;
+  ledSet(LedPattern::BlinkFast);
 
-  std::unique_ptr<WiFiClientSecure> client(new WiFiClientSecure());
-  if (!client) {
-    err = "client alloc failed";
-    return false;
-  }
-  client->setInsecure();
-  client->setTimeout(12000);
-  client->setHandshakeTimeout(12);
-  HTTPClient http;
-  if (!http.begin(*client, url)) {
-    err = "http begin failed";
-    return false;
-  }
-  http.setTimeout(15000);
-  http.setConnectTimeout(8000);
-  http.useHTTP10(true);
-  http.addHeader("Authorization", String("Bearer ") + cfg.portal_token);
-  http.addHeader("Accept-Encoding", "identity");
-  const char *headerKeys[] = {kRenewHeader};
-  http.collectHeaders(headerKeys, 1);
+  // 预热 DNS：长刷屏 / 中断后常见 hostByName 假死 → start_ssl_client:-1
+  if (!weatherWarmDns(url, err)) return false;
 
   DeserializationError jerr = DeserializationError::Ok;
   int code = 0;
   int size = -1;
   bool truncated = false;
   size_t got = 0;
-  {
-    WdtLongOpGuard wdt_off;  // TLS busy-spin 会饿死本核 idle WDT；仅关 loop WDT 不够
-    code = http.GET();
-    if (code <= 0) {
-      http.end();
-      err = String("HTTP ") + code + " " + path_and_query;
+
+  for (int attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) {
+      Serial.printf("[Weather] retry GET after recover rssi=%d ip=%s\n", wifiStaRssi(),
+                    wifiStaIp().c_str());
+      if (!wifiForceReconnect(12000) || !weatherWarmDns(url, err)) return false;
+      ledSet(LedPattern::BlinkFast);
+    }
+
+    std::unique_ptr<WiFiClientSecure> client(new WiFiClientSecure());
+    if (!client) {
+      err = "client alloc failed";
       return false;
     }
-    if (code == 401) {
-      captureRenewedToken(http);
-      http.end();
-      err = String("401 未授权 ") + path_and_query + " — 请在 Web /auth 重新登录";
+    client->setInsecure();
+    client->setTimeout(12000);
+    client->setHandshakeTimeout(12);
+    HTTPClient http;
+    if (!http.begin(*client, url)) {
+      err = "http begin failed";
+      if (attempt == 0) continue;
       return false;
     }
-    if (code < 200 || code >= 300) {
-      http.end();
-      err = String("HTTP ") + code + " " + path_and_query;
-      if (code == 404) err += "（Portal 无此路由，确认已部署天气 hourly）";
-      Serial.printf("[Weather] %s\n", err.c_str());
-      return false;
+    http.setTimeout(15000);
+    http.setConnectTimeout(8000);
+    http.useHTTP10(true);
+    if (api_key) {
+      // 和风也支持 Header；与 query key 二选一即可，这里只走 query，避免混用
+      http.addHeader("Accept-Encoding", "gzip");
+    } else {
+      http.addHeader("Authorization", String("Bearer ") + cfg.portal_token);
+      http.addHeader("Accept-Encoding", "identity");
     }
-    size = http.getSize();
-    Serial.printf("[Weather] HTTP %d size=%d\n", code, size);
-    if (size > (int)kWeatherJsonCap) {
-      http.end();
-      err = String("payload too large size=") + size + " " + path_and_query;
-      return false;
+    const char *headerKeys[] = {kRenewHeader, "Content-Encoding"};
+    http.collectHeaders(headerKeys, 2);
+
+    {
+      WdtLongOpGuard wdt_off;  // TLS busy-spin 会饿死本核 idle WDT；仅关 loop WDT 不够
+      code = http.GET();
+      if (code <= 0) {
+        Serial.printf("[Weather] HTTP %d wifi=%d rssi=%d ip=%s heap=%u\n", code, (int)WiFi.status(),
+                      wifiStaRssi(), wifiStaIp().c_str(), (unsigned)ESP.getFreeHeap());
+        http.end();
+        if (attempt == 0) continue;  // 重连再试一次
+        err = String("HTTP ") + code + " " + path_and_query;
+        return false;
+      }
+      if (code == 401) {
+        if (!api_key) captureRenewedToken(http);
+        http.end();
+        err = api_key ? String("401 未授权 ") + path_and_query + " — 检查和风 Key / Host"
+                      : String("401 未授权 ") + path_and_query + " — 请在 Web /auth 重新登录";
+        return false;
+      }
+      if (code < 200 || code >= 300) {
+        http.end();
+        err = String("HTTP ") + code + " " + path_and_query;
+        if (!api_key && code == 404) err += "（Portal 无此路由，确认已部署天气 hourly）";
+        Serial.printf("[Weather] %s\n", err.c_str());
+        return false;
+      }
+      size = http.getSize();
+      Serial.printf("[Weather] HTTP %d size=%d\n", code, size);
+      if (size > (int)kWeatherJsonCap) {
+        http.end();
+        err = String("payload too large size=") + size + " " + path_and_query;
+        return false;
+      }
+
+      const String enc = http.header("Content-Encoding");
+      // 和风直连常 gzip（Header 偶发缺失）：API 模式整包读入后按魔数/头判断
+      const bool prefer_buffer = api_key || enc.indexOf("gzip") >= 0;
+      if (prefer_buffer) {
+        const size_t cap = (size > 0) ? (size_t)size : kWeatherJsonCap;
+        std::vector<uint8_t> raw;
+        raw.reserve(cap);
+        WiFiClient &stream = http.getStream();
+        uint32_t last = millis();
+        while (http.connected() && (size < 0 || (int)raw.size() < size)) {
+          while (stream.available()) {
+            const int c = stream.read();
+            if (c < 0) break;
+            raw.push_back((uint8_t)c);
+            if (raw.size() > kWeatherJsonCap) {
+              http.end();
+              err = String("body >") + (int)kWeatherJsonCap;
+              return false;
+            }
+          }
+          if (size >= 0 && (int)raw.size() >= size) break;
+          if (!stream.available()) {
+            if (millis() - last > 12000) break;
+            delay(1);
+            weatherPump();
+          } else {
+            last = millis();
+          }
+        }
+        got = raw.size();
+        if (!api_key) captureRenewedToken(http);
+        http.end();
+
+        const bool looks_gzip =
+            enc.indexOf("gzip") >= 0 ||
+            (raw.size() >= 2 && raw[0] == 0x1f && raw[1] == 0x8b);
+        String plain;
+        if (looks_gzip) {
+          String gz_err;
+          if (!gunzipPayload(raw.data(), raw.size(), plain, gz_err)) {
+            err = String("gzip ") + gz_err + " " + path_and_query;
+            Serial.printf("[Weather] %s\n", err.c_str());
+            return false;
+          }
+        } else {
+          plain.reserve(raw.size());
+          for (uint8_t c : raw) plain += (char)c;
+        }
+        got = plain.length();
+        jerr = filter ? deserializeJson(doc, plain, DeserializationOption::Filter(*filter))
+                      : deserializeJson(doc, plain);
+      } else {
+        WeatherBodyStream body(http.getStream(), kWeatherJsonCap);
+        jerr = filter ? deserializeJson(doc, body, DeserializationOption::Filter(*filter))
+                      : deserializeJson(doc, body);
+        truncated = body.truncated();
+        got = body.bytes();
+        if (!api_key) captureRenewedToken(http);
+        http.end();
+      }
     }
-    WeatherBodyStream body(http.getStream(), kWeatherJsonCap);
-    jerr = filter ? deserializeJson(doc, body, DeserializationOption::Filter(*filter))
-                  : deserializeJson(doc, body);
-    truncated = body.truncated();
-    got = body.bytes();
-    captureRenewedToken(http);
-    http.end();
+    break;  // GET 成功拿到 body，离开 retry 循环
   }
 
   if (truncated) {
@@ -232,14 +437,19 @@ static bool portalWeatherGet(const char *path_and_query, JsonDocument &doc, Stri
     String m = jsonField(doc["message"]);
     if (!m.length()) m = jsonField(doc["msg"]);
     if (!m.length()) m = jsonField(doc["error"]);
-    if (!m.length()) m = "portal weather failed";
+    if (!m.length()) m = api_key ? "qweather api failed" : "portal weather failed";
     err = m + " | " + path_and_query;
     if (qcode.length()) err += String(" qcode=") + qcode;
     err += String(" HTTP ") + code;
-    Serial.printf("[Weather] portal fail: %s heap=%u\n", err.c_str(), (unsigned)ESP.getFreeHeap());
+    Serial.printf("[Weather] fail: %s heap=%u\n", err.c_str(), (unsigned)ESP.getFreeHeap());
     return false;
   }
   return true;
+}
+
+static bool portalWeatherGet(const char *path_and_query, JsonDocument &doc, String &err,
+                             const JsonDocument *filter = nullptr) {
+  return weatherHttpGet(path_and_query, doc, err, filter, false);
 }
 
 bool weatherGeoLookup(const char *query, WeatherGeoResult &out) {
@@ -270,12 +480,13 @@ bool weatherGeoLookup(const char *query, WeatherGeoResult &out) {
   }
 
   JsonDocument doc;
-  if (!portalWeatherGet(path.c_str(), doc, err)) {
+  if (!weatherHttpGet(path.c_str(), doc, err, nullptr, true)) {
     out.message = err;
     return false;
   }
 
-  JsonObject data = doc["data"].as<JsonObject>();
+  // Portal 包一层 data；和风直连顶层即 {code, location}
+  JsonObject data = weatherDataObj(doc);
   if (data.isNull()) {
     out.message = "no data";
     return false;
@@ -304,10 +515,16 @@ bool weatherGeoLookup(const char *query, WeatherGeoResult &out) {
   return out.ok;
 }
 
+static const char *weatherNotReadyMsg() {
+  return qweatherSourceIsApiKey()
+             ? "Weather not ready. Set Host/Key + location in web /weather"
+             : "Weather not ready. Login + set location in web /weather";
+}
+
 bool weatherFetchNow(WeatherNowData &out) {
   out = WeatherNowData{};
   if (!qweatherConfigured()) {
-    out.message = "Weather not ready. Login + set location in web /weather";
+    out.message = weatherNotReadyMsg();
     return false;
   }
   String err;
@@ -405,7 +622,7 @@ bool weatherFetchNow(WeatherNowData &out) {
 bool weatherFetchHourly(const char *hours_path, WeatherHourlyData &out) {
   out = WeatherHourlyData{};
   if (!qweatherConfigured()) {
-    out.message = "Weather not ready. Login + set location in web /weather";
+    out.message = weatherNotReadyMsg();
     return false;
   }
   if (!hours_path || !hours_path[0]) {
@@ -480,7 +697,7 @@ bool weatherFetchHourly(const char *hours_path, WeatherHourlyData &out) {
 bool weatherFetchDaily(const char *days_path, WeatherDailyData &out) {
   out = WeatherDailyData{};
   if (!qweatherConfigured()) {
-    out.message = "Weather not ready. Login + set location in web /weather";
+    out.message = weatherNotReadyMsg();
     return false;
   }
   if (!days_path || !days_path[0]) {
@@ -1070,8 +1287,10 @@ bool weatherShowMode(EpdSsd2683 &epd, WeatherMode mode) {
   }
   if (!qweatherConfigured()) {
     const char *msg =
-        "天气未就绪：需 Portal 登录 + 已选位置。\nWeb：/auth 登录，再打开 /weather 选城市。"
-        "\n（和风密钥在服务器，设备不存 Key）";
+        qweatherSourceIsApiKey()
+            ? "天气未就绪：需和风 Host + API Key + 已选位置。\nWeb：打开 /weather 配置并选城市。"
+            : "天气未就绪：需 Portal 登录 + 已选位置。\nWeb：/auth 登录，再打开 /weather 选城市。"
+              "\n（Portal 模式下和风密钥在服务器）";
     drawErrorPage(epd, mode, msg, "cfg");
     return true;  // UI 已按 mode 刷新；BOOT 切换应看到标题变化，勿 ErrorBurst
   }

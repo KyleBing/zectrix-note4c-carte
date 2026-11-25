@@ -129,6 +129,15 @@ pre{white-space:pre-wrap;background:#f7f7f5;padding:12px;border-radius:8px;font-
 .geo-list label{display:flex;gap:10px;align-items:flex-start;margin:0;cursor:pointer;color:#1a1a1a;font-size:14px;font-weight:500}
 .geo-list input{width:auto;margin:3px 0 0;accent-color:#1a1a1a}
 .geo-list .sub{display:block;margin-top:2px;font-size:12px;color:#888;font-weight:400}
+.set-step{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;margin-right:8px;border-radius:50%;background:#1a1a1a;color:#fff;font-size:12px;font-weight:700;vertical-align:middle}
+.set-status{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:14px 16px;margin:0 0 16px;border-radius:10px;background:#f7f7f5;border:1px solid #ebebe8}
+.set-status .lbl{font-size:12px;color:#888;font-weight:500}
+.set-status .name{font-size:18px;font-weight:650;color:#1a1a1a}
+.set-status .id{font-size:12px;color:#888}
+.set-status.empty .name{font-size:14px;font-weight:500;color:#888}
+.wx-search-row{display:flex;gap:8px;align-items:stretch;margin-top:4px}
+.wx-search-row input{flex:1;margin:0}
+.wx-search-row button{flex-shrink:0;margin:0;white-space:nowrap}
 .check-row{display:flex;align-items:center;gap:12px;padding:14px 16px;border:2px solid #1a1a1a;border-radius:10px;background:#fff;cursor:pointer;margin:4px 0 16px;user-select:none}
 .check-row input{width:22px;height:22px;margin:0;accent-color:#0a7a4b;flex-shrink:0}
 .check-row span{font-size:16px;font-weight:650;color:#1a1a1a}
@@ -483,7 +492,8 @@ static void appendFlashFromQuery(String &b) {
   const String code = g_server.arg("ok");
   const char *msg = nullptr;
   bool err = false;
-  if (code == "power") msg = "电源 / 日历设置已保存";
+  if (code == "power") msg = "电源设置已保存";
+  else if (code == "calendar") msg = "日历设置已保存";
   else if (code == "tz") msg = "时区 / NTP 周期已保存";
   else if (code == "ntp") msg = "NTP 校时完成";
   else if (code == "ntp_fail") {
@@ -498,8 +508,10 @@ static void appendFlashFromQuery(String &b) {
   else if (code == "todo") msg = "待办已拉取";
   else if (code == "weather") msg = "天气开关已保存";
   else if (code == "pick") msg = "已选用位置";
-  else if (code == "chess") msg = "象棋练习设置已保存";
-  else if (code == "quote") msg = "名言设置已保存";
+  else if (code == "chess" || code == "chess_content") msg = "象棋练习内容已保存";
+  else if (code == "chess_refresh") msg = "象棋定时翻局已保存";
+  else if (code == "quote" || code == "quote_play") msg = "名言播放顺序已保存";
+  else if (code == "quote_refresh") msg = "名言定时翻条已保存";
   else if (code == "quote_list") msg = "名言列表已保存";
   else if (code == "quote_one") msg = "名言已保存";
   else if (code == "quote_add") msg = "已添加名言";
@@ -718,10 +730,12 @@ static void handleRoot() {
   kvRow(b, "Diary", String(cfg.diary_id[0] ? cfg.diary_id : "—"));
   if (qweatherConfigured()) {
     String loc = String(cfg.qweather_location_name[0] ? cfg.qweather_location_name : cfg.qweather_location_id);
-    loc += " · via Portal";
+    loc += qweatherSourceIsApiKey() ? " · 和风 API" : " · via Portal";
     kvRow(b, "天气", loc);
   } else if (cfg.qweather_enabled) {
-    kvRow(b, "天气", String("<span class='pill warn'>需登录 + 选择位置</span>"));
+    kvRow(b, "天气",
+          String(qweatherSourceIsApiKey() ? "<span class='pill warn'>需 Host/Key + 位置</span>"
+                                          : "<span class='pill warn'>需登录 + 选择位置</span>"));
   } else {
     kvRow(b, "天气", String("<span class='pill off'>关闭</span>"));
   }
@@ -894,7 +908,8 @@ static void handleSettingsGet() {
   String b;
   appendFlashFromQuery(b);
 
-  b += F("<section><h2>应用</h2>"
+  // ① 应用开关
+  b += F("<section><h2><span class=set-step>1</span>应用</h2>"
          "<p class=hint>点击卡片切换是否在设备上启用。上下键只在已启用应用间切换；至少保留一个。</p>"
          "<div class=app-grid>");
   const int n = static_cast<int>(AppId::Count);
@@ -918,11 +933,13 @@ static void handleSettingsGet() {
   }
   b += F("</div></section>");
 
-  b += F("<section><h2>电源</h2>"
-         "<p class=hint>无操作自动关机是本固件自己的计时，不是芯片默认。按下任意键会重新计时。"
-         "开启 Web 配置期间不会自动关机，方便慢慢配网。"
-         "「连接电源时自动关机」关闭后，充电/充满（接 USB）时不会因空闲关机。</p>"
+  // ② 电源（与日历拆开）
+  b += F("<section><h2><span class=set-step>2</span>电源</h2>"
+         "<p class=hint>无操作自动关机是本固件自己的计时；按任意键会重新计时。"
+         "开启 Web 配置期间不会自动关机。"
+         "「连接电源时自动关机」关闭后，接 USB 时不会因空闲关机。</p>"
          "<form method=POST action=/power>"
+         "<input type=hidden name=action value=power>"
          "<label>无操作自动关机</label>"
          "<select name=idle_off_sec>");
   const uint32_t idle_opts[] = {0, 60, 180, 300, 600, 900};
@@ -953,17 +970,24 @@ static void handleSettingsGet() {
   b += F(">关闭（接电保持开机）</option><option value=1");
   if (cfg.idle_off_on_power) b += F(" selected");
   b += F(">开启（接电也空闲关机）</option></select>");
-  b += F("<label>日历一周起始</label><select name=week_start>");
-  b += F("<option value=mon");
+  b += F("<div class=btn-row><button type=submit>保存电源设置</button></div></form></section>");
+
+  // ③ 日历
+  b += F("<section><h2><span class=set-step>3</span>日历</h2>"
+         "<p class=hint>仅影响日历 App 一周的起始日。</p>"
+         "<form method=POST action=/power>"
+         "<input type=hidden name=action value=calendar>"
+         "<label>一周起始</label><select name=week_start>"
+         "<option value=mon");
   if (cfg.week_start_monday) b += F(" selected");
   b += F(">周一</option><option value=sun");
   if (!cfg.week_start_monday) b += F(" selected");
-  b += F(">周日</option></select>");
-  b += F("<div class=btn-row><button type=submit>保存电源 / 日历设置</button></div></form></section>");
+  b += F(">周日</option></select>"
+         "<div class=btn-row><button type=submit>保存日历设置</button></div></form></section>");
 
-  b += F("<section><h2>时间 / 时区</h2>"
-         "<p class=hint>板载 PCF8563 可在掉电后继续走时。复位后下次联网会校一次；平时按周期 NTP。"
-         "离线可在下方手动设置本地时间。</p>");
+  // ④ 时区 / NTP
+  b += F("<section><h2><span class=set-step>4</span>时区 / NTP</h2>"
+         "<p class=hint>板载 PCF8563 掉电后仍走时。复位后下次联网会校一次；平时按周期 NTP。</p>");
   b += F("<form method=POST action=/time>");
   b += F("<label>时区（UTC 偏移）</label><select name=tz_offset_min>");
   static const int tz_opts[] = {-720, -600, -480, -300, 0, 60, 120, 180, 330, 480, 540, 600, 720};
@@ -1004,9 +1028,14 @@ static void handleSettingsGet() {
   b += F("<div class=btn-row>"
          "<button type=submit name=action value=save_cfg>保存时区 / 周期</button>"
          "<button type=submit name=action value=ntp_now class=secondary>立即 NTP 校时</button>"
-         "</div>");
-  b += F("<label>手动设置本地时间</label>");
-  b += F("<input type=datetime-local name=manual_time step=1");
+         "</div></form></section>");
+
+  // ⑤ 手动校时（离线）
+  b += F("<section><h2><span class=set-step>5</span>手动校时</h2>"
+         "<p class=hint>无网时直接写入本地时间到 RTC。</p>"
+         "<form method=POST action=/time>"
+         "<label>本地时间</label>"
+         "<input type=datetime-local name=manual_time step=1");
   RtcDateTime now;
   if (rtcRead(now)) {
     char v[32];
@@ -1014,9 +1043,9 @@ static void handleSettingsGet() {
              now.hour, now.minute, now.second);
     b += v;
   }
-  b += F(">");
-  b += F("<div class=btn-row><button type=submit name=action value=set_manual>写入 RTC</button></div>");
-  b += F("</form></section>");
+  b += F(">"
+         "<div class=btn-row><button type=submit name=action value=set_manual>写入 RTC</button></div>"
+         "</form></section>");
 
   sendHtml(NavTab::Settings, b);
 }
@@ -1029,10 +1058,12 @@ static void handleChessGet() {
   uint32_t d = 0, h = 0, m = 0;
   weatherRefreshToDhm(cfg.chess_refresh_sec, d, h, m);
   const uint8_t lv = cfg.chess_levels ? cfg.chess_levels : CHESS_LV_ALL;
-  b += F("<section><h2>象棋练习</h2>"
-         "<p class=hint>控制练习局面的播放顺序、内容等级，以及停留在象棋 App 时的自动翻局（关机亦可 RTC 定时醒）。"
-         "间隔至少 <strong>1 分钟</strong>。等级可多选；全不选则视为全部。</p>"
+
+  // ① 练习内容
+  b += F("<section><h2><span class=set-step>1</span>练习内容</h2>"
+         "<p class=hint>先选播放顺序与局面等级。等级可多选；全不选则视为全部。</p>"
          "<form method=POST action=/chess>"
+         "<input type=hidden name=action value=content>"
          "<label>播放顺序</label><select name=order>"
          "<option value=seq");
   if (!cfg.chess_random) b += F(" selected");
@@ -1069,8 +1100,15 @@ static void handleChessGet() {
   b += String(chessPositionCount());
   b += F(" / 内置 ");
   b += String(chessCountForLevel(CHESS_LV_ALL));
-  b += F("</p>");
-  b += F("</div>"
+  b += F("</p></div>"
+         "<div class=btn-row><button type=submit>保存练习内容</button></div></form></section>");
+
+  // ② 定时翻局
+  b += F("<section><h2><span class=set-step>2</span>定时翻局</h2>"
+         "<p class=hint>停留在象棋 App 时按间隔自动翻局；关机亦可 RTC 定时醒。"
+         "间隔至少 <strong>1 分钟</strong>。</p>"
+         "<form method=POST action=/chess>"
+         "<input type=hidden name=action value=refresh>"
          "<label class='check-row");
   if (cfg.chess_refresh_en) b += F(" on");
   b += F("'><input type=checkbox name=refresh_en value=1");
@@ -1086,12 +1124,27 @@ static void handleChessGet() {
          "<label style=margin:0>分<br><input name=refresh_m type=number min=0 max=59 step=1 value=");
   b += String(m);
   b += F(" style=width:5.5em></label></div>"
-         "<div class=btn-row><button type=submit>保存象棋设置</button></div></form></section>");
+         "<div class=btn-row><button type=submit>保存定时设置</button></div></form></section>");
 
   sendHtml(NavTab::Chess, b);
 }
 
 static void handleChessPost() {
+  const AppConfig &cfg = getAppConfig();
+  const String action = g_server.hasArg("action") ? g_server.arg("action") : String("content");
+
+  if (action == "refresh") {
+    const bool refresh_en = g_server.hasArg("refresh_en");
+    const uint32_t d = (uint32_t)g_server.arg("refresh_d").toInt();
+    const uint32_t h = (uint32_t)g_server.arg("refresh_h").toInt();
+    const uint32_t m = (uint32_t)g_server.arg("refresh_m").toInt();
+    saveChessSettings(cfg.chess_random, cfg.chess_levels ? cfg.chess_levels : CHESS_LV_ALL,
+                      refresh_en, weatherRefreshSecFromDhm(d, h, m));
+    redirectOk("/chess", "chess_refresh");
+    return;
+  }
+
+  // content
   const bool random_order = g_server.arg("order") == "rand";
   uint8_t levels = 0;
   if (g_server.hasArg("lv_opening")) levels |= CHESS_LV_OPENING;
@@ -1099,14 +1152,8 @@ static void handleChessPost() {
   if (g_server.hasArg("lv_middle")) levels |= CHESS_LV_MIDDLE;
   if (g_server.hasArg("lv_endgame")) levels |= CHESS_LV_ENDGAME;
   if (levels == 0) levels = CHESS_LV_ALL;
-
-  const bool refresh_en = g_server.hasArg("refresh_en");
-  const uint32_t d = (uint32_t)g_server.arg("refresh_d").toInt();
-  const uint32_t h = (uint32_t)g_server.arg("refresh_h").toInt();
-  const uint32_t m = (uint32_t)g_server.arg("refresh_m").toInt();
-  const uint32_t sec = weatherRefreshSecFromDhm(d, h, m);
-  saveChessSettings(random_order, levels, refresh_en, sec);
-  redirectOk("/chess", "chess");
+  saveChessSettings(random_order, levels, cfg.chess_refresh_en, cfg.chess_refresh_sec);
+  redirectOk("/chess", "chess_content");
 }
 
 static void handleAppsPost() {
@@ -1120,12 +1167,17 @@ static void handleAppsPost() {
 }
 
 static void handlePowerPost() {
+  const String action = g_server.hasArg("action") ? g_server.arg("action") : String("power");
+  // 日历一周起始单独表单，避免与电源字段互相覆盖
+  if (action == "calendar") {
+    saveWeekStartMonday(g_server.arg("week_start") != "sun");
+    redirectOk("/settings", "calendar");
+    return;
+  }
   const uint32_t sec = (uint32_t)g_server.arg("idle_off_sec").toInt();
   saveIdleOffSec(sec);
   powerIdleSetTimeoutSec(sec);
   saveIdleOffOnPower(g_server.arg("idle_off_on_power") == "1");
-  const String ws = g_server.arg("week_start");
-  saveWeekStartMonday(ws != "sun");
   redirectOk("/settings", "power");
 }
 
@@ -1177,8 +1229,8 @@ static void handleWifiGet() {
   const AppConfig &cfg = getAppConfig();
   String b;
   appendFlashFromQuery(b);
-  b += F("<section><h2>WiFi（最多 5 条）</h2>");
-  b += F("<p class=hint>大字为 SSID，下方小字为密码。保存后按 Active → 其它条目自动尝试连接。</p>");
+  b += F("<section><h2>WiFi</h2>");
+  b += F("<p class=hint>最多 5 条。大字为 SSID，下方小字为密码。保存后按 Active → 其它条目依次尝试连接。</p>");
   b += F("<form method=POST action=/wifi>");
   for (int i = 0; i < WIFI_PROFILE_MAX; i++) {
     const char *ssid = i < cfg.wifi_count ? cfg.wifis[i].ssid : "";
@@ -1241,6 +1293,7 @@ static void handleWifiPost() {
   portal["diary_id"] = cfg.diary_id;
   JsonObject qw = doc["qweather"].to<JsonObject>();
   qw["enabled"] = cfg.qweather_enabled;
+  qw["source"] = cfg.qweather_source;
   qw["host"] = cfg.qweather_host;
   qw["key"] = cfg.qweather_key;
   qw["location_id"] = cfg.qweather_location_id;
@@ -1257,22 +1310,50 @@ static void handleWifiPost() {
 }
 
 static void appendAuthForm(String &b, const AppConfig &cfg) {
-  b += F("<section><h2>Portal 鉴权</h2>");
-  b += F("<p class=hint>登录 <code>POST /user/login</code> 保存 JWT；响应头 "
-         "<code>X-Access-Token</code>（剩余 &lt; 7 天）会自动续签。</p>");
+  const bool has_token = cfg.portal_token[0] != '\0';
+
+  // ① 服务与账号
+  b += F("<section><h2><span class=set-step>1</span>服务与账号</h2>");
+  b += F("<p class=hint>先填 Portal 地址与邮箱；Diary ID 给待办网络日记用。</p>");
   b += F("<form method=POST action=/auth>");
+  b += F("<input type=hidden name=action value=save>");
   b += F("<label>API Base URL</label><input name=base_url value=\"");
   b += htmlEscapeAttr(cfg.portal_base_url);
   b += F("\">");
   b += F("<label>邮箱</label><input name=email type=email value=\"");
   b += htmlEscapeAttr(cfg.portal_email);
   b += F("\">");
-  b += F("<label>密码（仅本次登录，不落盘）</label><input name=password type=password autocomplete=current-password>");
   b += F("<label>Diary ID</label><input name=diary_id value=\"");
   b += htmlEscapeAttr(cfg.diary_id);
   b += F("\">");
+  b += F("<div class=btn-row><button type=submit>保存服务配置</button></div></form></section>");
+
+  // ② 登录
+  b += F("<section><h2><span class=set-step>2</span>登录</h2>");
+  b += F("<p class=hint>登录 <code>POST /user/login</code> 保存 JWT；响应头 "
+         "<code>X-Access-Token</code>（剩余 &lt; 7 天）会自动续签。密码仅本次提交，不落盘。</p>");
+  b += F("<div class='set-status");
+  if (!has_token) b += F(" empty");
+  b += F("'><span class=lbl>Token</span>");
+  if (has_token) {
+    b += F("<span class=name>已登录</span><code class=id>");
+    b += htmlEscapeAttr(cfg.portal_email);
+    b += F("</code>");
+  } else {
+    b += F("<span class=name>未登录 — 填写密码后登录</span>");
+  }
+  b += F("</div>");
+  b += F("<form method=POST action=/auth>");
+  b += F("<label>密码</label><input name=password type=password autocomplete=current-password>");
+  // 登录时带上当前 URL/邮箱，避免只填密码时丢配置
+  b += F("<input type=hidden name=base_url value=\"");
+  b += htmlEscapeAttr(cfg.portal_base_url);
+  b += F("\"><input type=hidden name=email value=\"");
+  b += htmlEscapeAttr(cfg.portal_email);
+  b += F("\"><input type=hidden name=diary_id value=\"");
+  b += htmlEscapeAttr(cfg.diary_id);
+  b += F("\">");
   b += F("<div class=btn-row>");
-  b += F("<button type=submit name=action value=save>保存 URL / ID</button>");
   b += F("<button type=submit name=action value=login>登录</button>");
   b += F("<button type=submit name=action value=logout class=danger>清除 Token</button>");
   b += F("</div></form></section>");
@@ -1363,10 +1444,9 @@ static void appendTodoPage(String &b, const char *flash_html = nullptr) {
   if (flash_html && flash_html[0]) b += flash_html;
   appendFlashFromQuery(b);
 
-  b += F("<section><h2>数据源</h2>"
-         "<p class=hint>可选 Portal 日记，或直接在本页用日记原文格式书写本机待办。</p>"
-         "<p class='hint sm'>规则：每行一项；<code>- </code>未完成、<code>= </code>已完成；"
-         "可选 <code> #备注</code>（黄字）。例：<code>- 买菜 #晚上</code></p>"
+  // ① 数据源
+  b += F("<section><h2><span class=set-step>1</span>数据源</h2>"
+         "<p class=hint>先选从哪读待办：本机正文，或 Portal 网络日记。</p>"
          "<form method=POST action=/todo>"
          "<input type=hidden name=action value=mode>"
          "<label class='check-row");
@@ -1376,10 +1456,16 @@ static void appendTodoPage(String &b, const char *flash_html = nullptr) {
   b += F("><span>使用本机正文（不拉网络）</span></label>"
          "<div class=btn-row><button type=submit>保存数据源</button></div></form></section>");
 
+  // ② 本机正文
   String local;
   todoLocalLoad(local);
-  b += F("<section><h2>本机正文</h2>"
-         "<form method=POST action=/todo>"
+  b += F("<section><h2><span class=set-step>2</span>本机正文</h2>"
+         "<p class=hint>规则：每行一项；<code>- </code>未完成、<code>= </code>已完成；"
+         "可选 <code> #备注</code>（黄字）。例：<code>- 买菜 #晚上</code></p>");
+  if (!cfg.todo_use_local) {
+    b += F("<p class='hint sm'>当前数据源为网络日记；本机正文仍可编辑备用，启用上方开关后才会显示在设备上。</p>");
+  }
+  b += F("<form method=POST action=/todo>"
          "<input type=hidden name=action value=save_local>"
          "<label>正文</label><textarea class=todo-src name=content>");
   String esc = local;
@@ -1390,16 +1476,20 @@ static void appendTodoPage(String &b, const char *flash_html = nullptr) {
   b += F("</textarea>"
          "<div class=btn-row><button type=submit>保存本机待办</button></div></form>");
   if (local.length()) {
-    b += F("<h2 style=margin-top:18px>本机预览</h2>");
+    b += F("<p class=meta style=margin-top:14px>本机预览</p>");
     appendTodoPreviewList(b, local);
   }
   b += F("</section>");
 
-  b += F("<section><h2>网络日记</h2>"
-         "<p class=hint>从 portal <code>GET /diary/detail</code> 拉取，需「同 WiFi 站点」已连外网并登录。"
-         "拉取结果仅预览，不会覆盖本机正文。</p>"
-         "<form method=POST action=/todo><input type=hidden name=action value=fetch>"
-         "<div class=btn-row><button type=submit>立即拉取</button></div></form></section>");
+  // ③ 网络日记
+  b += F("<section><h2><span class=set-step>3</span>网络日记</h2>"
+         "<p class=hint>从 Portal <code>GET /diary/detail</code> 拉取；需「同 WiFi 站点」已连外网并在「鉴权」页登录。"
+         "拉取结果仅预览，不会覆盖本机正文。</p>");
+  if (cfg.todo_use_local) {
+    b += F("<p class='hint sm'>当前使用本机正文；关闭步骤 1 的开关后，设备才会显示网络日记。</p>");
+  }
+  b += F("<form method=POST action=/todo><input type=hidden name=action value=fetch>"
+         "<div class=btn-row><button type=submit>立即拉取预览</button></div></form></section>");
 }
 
 static void handleTodoGet() {
@@ -1458,34 +1548,158 @@ static void handleTodoPost() {
   sendHtml(NavTab::Todo, b);
 }
 
+// 天气页：① 数据源 → ② 位置（当前+搜索+选用）→ ③ 定时；geo_query 用于搜索后回填
 static void appendWeatherForm(String &b, const AppConfig &cfg, const WeatherGeoResult *geo,
-                              const char *flash_html) {
+                              const char *flash_html, const char *geo_query = nullptr) {
   if (flash_html && flash_html[0]) b += flash_html;
-  b += F("<section><h2>天气位置</h2>");
-  b += F("<p class=hint>设备经 <strong>Portal</strong> 拉天气（和风官方路径 "
-         "<code>/v7/weather/now|24h|7d</code>、<code>/geo/v2/city/lookup</code>），"
-         "和风 JWT/Key 在服务器。请先在「鉴权」登录，再用下方搜索选位置。</p>");
-  b += F("<form method=POST action=/weather>");
+  const bool src_api = (cfg.qweather_source == QW_SRC_APIKEY);
+  const bool has_loc = cfg.qweather_location_id[0] != '\0';
+
+  // —— ① 数据源 / 开关 ——
+  b += F("<section><h2><span class=set-step>1</span>数据源</h2>");
+  b += F("<p class=hint>先选请求方式并启用天气。<strong>Portal</strong> 用登录 JWT 代理和风；"
+         "<strong>和风 API Key</strong> 用普通 <code>key=</code> 直连（非 JWT）。</p>");
+  b += F("<form method=POST action=/weather id=wx-source-form>");
   b += F("<label class='check-row");
   if (cfg.qweather_enabled) b += F(" on");
   b += F("'><input type=checkbox name=enabled value=1");
   if (cfg.qweather_enabled) b += F(" checked");
   b += F("><span>启用天气</span></label>");
-  b += F("<label>当前 LocationID</label><input name=location_id value=\"");
-  b += htmlEscapeAttr(cfg.qweather_location_id);
-  b += F("\" readonly>");
-  b += F("<label>位置名称</label><input name=location_name value=\"");
-  b += htmlEscapeAttr(cfg.qweather_location_name);
-  b += F("\" readonly>");
-  b += F("<div class=btn-row><button type=submit name=action value=save>保存开关</button></div>");
-  b += F("</form></section>");
 
+  b += F("<label class='check-row");
+  if (!src_api) b += F(" on");
+  b += F("'><input type=radio name=source value=0");
+  if (!src_api) b += F(" checked");
+  b += F("><span>Portal 代理（JWT）</span></label>");
+  b += F("<label class='check-row");
+  if (src_api) b += F(" on");
+  b += F("'><input type=radio name=source value=1");
+  if (src_api) b += F(" checked");
+  b += F("><span>和风普通 API Key</span></label>");
+
+  b += F("<div class=qw-api-fields style=\"");
+  b += src_api ? F("display:block") : F("display:none");
+  b += F("\">");
+  b += F("<label>API Host</label><input name=host placeholder=\"控制台 API Host 或 devapi.qweather.com\" value=\"");
+  b += htmlEscapeAttr(cfg.qweather_host);
+  b += F("\">");
+  b += F("<label>API Key");
+  if (cfg.qweather_key[0]) b += F(" <span class=hint>（已保存，留空不改）</span>");
+  b += F("</label><input name=key type=password autocomplete=off placeholder=\"和风 API KEY\" value=\"\">");
+  b += F("</div>");
+
+  b += F("<div class=btn-row><button type=submit name=action value=save>保存数据源</button></div>");
+  b += F("</form>");
+  // 切换 radio 时显示/隐藏 Host+Key
+  b += F("<script>(function(){var f=document.getElementById('wx-source-form');"
+         "if(!f)return;var box=f.querySelector('.qw-api-fields');"
+         "function sync(){var a=f.querySelector('input[name=source][value=\"1\"]');"
+         "if(box)box.style.display=(a&&a.checked)?'block':'none';}"
+         "f.querySelectorAll('input[name=source]').forEach(function(r){r.addEventListener('change',sync);});"
+         "sync();})();</script>");
+  b += F("</section>");
+
+  // —— ② 位置：当前 + 搜索 + 选用 放一起 ——
+  b += F("<section><h2><span class=set-step>2</span>位置</h2>");
+  if (src_api) {
+    b += F("<p class=hint>搜索城市后点选用即可写入 LocationID。"
+           "需已填 Host + Key，且设备「同 WiFi 站点」已连外网。</p>");
+  } else {
+    b += F("<p class=hint>搜索城市后点选用即可写入 LocationID。"
+           "需「同 WiFi 站点」已连接并登录 Portal。</p>");
+  }
+
+  b += F("<div class='set-status");
+  if (!has_loc) b += F(" empty");
+  b += F("'><span class=lbl>当前</span>");
+  if (has_loc) {
+    b += F("<span class=name>");
+    b += htmlEscapeAttr(cfg.qweather_location_name[0] ? cfg.qweather_location_name
+                                                       : cfg.qweather_location_id);
+    b += F("</span><code class=id>");
+    b += htmlEscapeAttr(cfg.qweather_location_id);
+    b += F("</code>");
+  } else {
+    b += F("<span class=name>尚未设置 — 请下方搜索并选用</span>");
+  }
+  b += F("</div>");
+
+  b += F("<form method=POST action=/weather>");
+  b += F("<label>搜索城市 / 区县</label>");
+  b += F("<div class=wx-search-row>");
+  b += F("<input name=geo_query placeholder=\"例如 杭州 或 西湖\" value=\"");
+  if (geo_query && geo_query[0]) b += htmlEscapeAttr(geo_query);
+  b += F("\">");
+  b += F("<button type=submit name=action value=search>搜索</button>");
+  b += F("</div></form>");
+
+  if (geo && geo->ok && geo->count > 0) {
+    // 有当前城市则默认勾中它，否则勾第一项
+    int checked_i = 0;
+    if (has_loc) {
+      for (int i = 0; i < geo->count; i++) {
+        if (geo->items[i].id.equals(cfg.qweather_location_id)) {
+          checked_i = i;
+          break;
+        }
+      }
+    }
+    b += F("<form method=POST action=/weather><p class=meta style=margin-top:14px>找到 ");
+    b += String(geo->count);
+    b += F(" 个结果，选一个设为当前位置：</p><ul class=geo-list>");
+    for (int i = 0; i < geo->count; i++) {
+      const WeatherGeoItem &it = geo->items[i];
+      const bool is_cur = has_loc && it.id.equals(cfg.qweather_location_id);
+      b += F("<li><label><input type=radio name=pick value=\"");
+      b += htmlEscapeAttr(it.id.c_str());
+      if (i == checked_i) b += F("\" checked");
+      else b += F("\"");
+      b += F("><span><strong>");
+      String name = it.name;
+      name.replace("&", "&amp;");
+      name.replace("<", "&lt;");
+      b += name;
+      b += F("</strong> <code>");
+      b += it.id;
+      b += F("</code>");
+      if (is_cur) b += F(" <span class='pill on'>当前</span>");
+      b += F("<span class=sub>");
+      String sub = it.adm1;
+      if (it.adm2.length()) {
+        sub += " · ";
+        sub += it.adm2;
+      }
+      if (it.country.length()) {
+        sub += " · ";
+        sub += it.country;
+      }
+      sub.replace("&", "&amp;");
+      sub.replace("<", "&lt;");
+      b += sub;
+      b += F("</span></span></label>");
+      b += F("<input type=hidden name=name_");
+      b += it.id;
+      b += F(" value=\"");
+      b += htmlEscapeAttr(it.name.c_str());
+      b += F("\">");
+      b += F("</li>");
+    }
+    b += F("</ul><div class=btn-row>"
+           "<button type=submit name=action value=pick>设为当前位置</button></div></form>");
+  } else if (geo && !geo->ok && geo->message.length()) {
+    b += F("<div class='flash err' style=margin-top:12px>");
+    b += geo->message;
+    b += F("</div>");
+  }
+  b += F("</section>");
+
+  // —— ③ 定时刷新 ——
   {
     uint32_t d = 0, h = 0, m = 0;
     weatherRefreshToDhm(cfg.weather_refresh_sec, d, h, m);
-    b += F("<section><h2>定时刷新</h2>"
-           "<p class=hint>开关打开后：停留在天气 App 时按间隔自动拉数；关机时若前台是天气则 "
-           "<strong>RTC 定时深睡</strong>到点唤醒刷新再睡。开关关闭则不自动刷、关机走松电。"
+    b += F("<section><h2><span class=set-step>3</span>定时刷新</h2>"
+           "<p class=hint>位置设好后可开定时：停留在天气 App 时按间隔拉数；关机且前台是天气则 "
+           "<strong>RTC 定时深睡</strong>到点唤醒刷新再睡。关则不自动刷、关机走松电。"
            "间隔至少 <strong>1 分钟</strong>。</p>"
            "<form method=POST action=/weather>"
            "<label class='check-row");
@@ -1507,59 +1721,6 @@ static void appendWeatherForm(String &b, const AppConfig &cfg, const WeatherGeoR
            "<div class=btn-row><button type=submit name=action value=refresh>保存定时设置</button></div>"
            "</form></section>");
   }
-
-  b += F("<section><h2>搜索位置</h2>");
-  b += F("<p class=hint>经 Portal <code>/geo/v2/city/lookup</code> 调和风城市搜索；需「同 WiFi 站点」已连接并登录。</p>");
-  b += F("<form method=POST action=/weather>");
-  b += F("<label>城市 / 区县名</label><input name=geo_query placeholder=\"例如 杭州 或 西湖\">");
-  b += F("<div class=btn-row><button type=submit name=action value=search>搜索</button></div>");
-  b += F("</form>");
-
-  if (geo && geo->ok && geo->count > 0) {
-    b += F("<form method=POST action=/weather><ul class=geo-list>");
-    for (int i = 0; i < geo->count; i++) {
-      const WeatherGeoItem &it = geo->items[i];
-      b += F("<li><label><input type=radio name=pick value=\"");
-      b += htmlEscapeAttr(it.id.c_str());
-      if (i == 0) b += F("\" checked");
-      else b += F("\"");
-      b += F("><span><strong>");
-      String name = it.name;
-      name.replace("&", "&amp;");
-      name.replace("<", "&lt;");
-      b += name;
-      b += F("</strong> <code>");
-      b += it.id;
-      b += F("</code><span class=sub>");
-      String sub = it.adm1;
-      if (it.adm2.length()) {
-        sub += " · ";
-        sub += it.adm2;
-      }
-      if (it.country.length()) {
-        sub += " · ";
-        sub += it.country;
-      }
-      sub.replace("&", "&amp;");
-      sub.replace("<", "&lt;");
-      b += sub;
-      b += F("</span></span></label>");
-      // stash name in hidden field keyed by id
-      b += F("<input type=hidden name=name_");
-      b += it.id;
-      b += F(" value=\"");
-      b += htmlEscapeAttr(it.name.c_str());
-      b += F("\">");
-      b += F("</li>");
-    }
-    b += F("</ul><div class=btn-row>"
-           "<button type=submit name=action value=pick>选用所选位置</button></div></form>");
-  } else if (geo && !geo->ok && geo->message.length()) {
-    b += F("<div class='flash err'>");
-    b += geo->message;
-    b += F("</div>");
-  }
-  b += F("</section>");
 }
 
 static void handleWeatherGet() {
@@ -1572,13 +1733,19 @@ static void handleWeatherPost() {
   const String action = g_server.arg("action");
   String flash;
   WeatherGeoResult geo;
+  String last_query;
 
   if (action == "save") {
     const bool enabled = g_server.hasArg("enabled");
+    const uint8_t source =
+        (g_server.arg("source").toInt() == (int)QW_SRC_APIKEY) ? QW_SRC_APIKEY : QW_SRC_PORTAL;
     const AppConfig &cfg = getAppConfig();
-    saveQWeatherConfig(enabled, cfg.qweather_host, cfg.qweather_key, cfg.qweather_location_id,
+    const String host = g_server.hasArg("host") ? g_server.arg("host") : String(cfg.qweather_host);
+    // key 留空则保留已有（saveQWeatherConfig 内处理）
+    const String key = g_server.hasArg("key") ? g_server.arg("key") : String("");
+    saveQWeatherConfig(enabled, source, host.c_str(), key.c_str(), cfg.qweather_location_id,
                        cfg.qweather_location_name);
-    flash = F("<div class='flash ok'>天气开关已保存</div>");
+    flash = F("<div class='flash ok'>数据源已保存</div>");
   } else if (action == "refresh") {
     const bool en = g_server.hasArg("refresh_en");
     const uint32_t d = (uint32_t)g_server.arg("refresh_d").toInt();
@@ -1599,8 +1766,8 @@ static void handleWeatherPost() {
     flash += String(om);
     flash += F(" 分</div>");
   } else if (action == "search") {
-    const String q = g_server.arg("geo_query");
-    if (!weatherGeoLookup(q.c_str(), geo)) {
+    last_query = g_server.arg("geo_query");
+    if (!weatherGeoLookup(last_query.c_str(), geo)) {
       flash = F("<div class='flash err'>搜索失败");
       if (geo.message.length()) {
         flash += F("：");
@@ -1608,17 +1775,19 @@ static void handleWeatherPost() {
       }
       flash += F("</div>");
     } else {
-      flash = F("<div class='flash ok'>搜索完成，找到 ");
+      flash = F("<div class='flash ok'>找到 ");
       flash += String(geo.count);
-      flash += F(" 个位置</div>");
+      flash += F(" 个位置，请选用</div>");
     }
   } else if (action == "pick") {
     const String id = g_server.arg("pick");
     const String name_key = String("name_") + id;
     const String name = g_server.hasArg(name_key) ? g_server.arg(name_key) : id;
     const AppConfig &cfg = getAppConfig();
-    saveQWeatherConfig(true, cfg.qweather_host, cfg.qweather_key, id.c_str(), name.c_str());
-    flash = F("<div class='flash ok'>已选用位置 ");
+    // 选用位置时一并打开天气开关
+    saveQWeatherConfig(true, cfg.qweather_source, cfg.qweather_host, cfg.qweather_key, id.c_str(),
+                       name.c_str());
+    flash = F("<div class='flash ok'>已设为当前位置：");
     flash += name;
     flash += F("（");
     flash += id;
@@ -1626,7 +1795,8 @@ static void handleWeatherPost() {
   }
 
   String b;
-  appendWeatherForm(b, getAppConfig(), (action == "search") ? &geo : nullptr, flash.c_str());
+  appendWeatherForm(b, getAppConfig(), (action == "search") ? &geo : nullptr, flash.c_str(),
+                    last_query.length() ? last_query.c_str() : nullptr);
   sendHtml(NavTab::Weather, b);
 }
 
@@ -1742,16 +1912,24 @@ static void handleQuoteGet() {
   uint32_t d = 0, h = 0, m = 0;
   weatherRefreshToDhm(cfg.quote_refresh_sec, d, h, m);
 
-  b += F("<section><h2>名言警句</h2>"
-         "<p class=hint>每条含「内容」与「作者」；设备停留在「名言」App 时可按间隔翻条（关机亦可 RTC 定时醒）。</p>"
+  // ① 播放顺序
+  b += F("<section><h2><span class=set-step>1</span>播放顺序</h2>"
+         "<p class=hint>设备停留在「名言」App 时按此顺序翻条。</p>"
          "<form method=POST action=/quote>"
-         "<input type=hidden name=action value=settings>"
-         "<label>播放顺序</label><select name=order>"
+         "<input type=hidden name=action value=play>"
+         "<label>顺序</label><select name=order>"
          "<option value=seq");
   if (!cfg.quote_random) b += F(" selected");
   b += F(">顺序</option><option value=rand");
   if (cfg.quote_random) b += F(" selected");
   b += F(">乱序</option></select>"
+         "<div class=btn-row><button type=submit>保存播放顺序</button></div></form></section>");
+
+  // ② 定时翻条
+  b += F("<section><h2><span class=set-step>2</span>定时翻条</h2>"
+         "<p class=hint>开启后按间隔自动翻条；关机亦可 RTC 定时醒。间隔至少 <strong>1 分钟</strong>。</p>"
+         "<form method=POST action=/quote>"
+         "<input type=hidden name=action value=refresh>"
          "<label class='check-row");
   if (cfg.quote_refresh_en) b += F(" on");
   b += F("'><input type=checkbox name=refresh_en value=1");
@@ -1767,9 +1945,10 @@ static void handleQuoteGet() {
          "<label style=margin:0>分<br><input name=refresh_m type=number min=0 max=59 step=1 value=");
   b += String(m);
   b += F(" style=width:5.5em></label></div>"
-         "<div class=btn-row><button type=submit>保存名言设置</button></div></form></section>");
+         "<div class=btn-row><button type=submit>保存定时设置</button></div></form></section>");
 
-  b += F("<section><h2>名言列表</h2>"
+  // ③ 名言列表
+  b += F("<section><h2><span class=set-step>3</span>名言列表</h2>"
          "<p class='hint sm'>左侧点选一条，右侧修改或删除；「新增」追加空条。诗词在正文换行分句。最多 ");
   b += String(QUOTE_ITEM_MAX);
   b += F(" 条。</p>"
@@ -1986,13 +2165,21 @@ static void handleQuotePost() {
     return;
   }
 
+  const AppConfig &cfg = getAppConfig();
+  if (action == "refresh") {
+    const bool refresh_en = g_server.hasArg("refresh_en");
+    const uint32_t d = (uint32_t)g_server.arg("refresh_d").toInt();
+    const uint32_t h = (uint32_t)g_server.arg("refresh_h").toInt();
+    const uint32_t m = (uint32_t)g_server.arg("refresh_m").toInt();
+    saveQuoteSettings(cfg.quote_random, refresh_en, weatherRefreshSecFromDhm(d, h, m));
+    redirectOk("/quote", "quote_refresh");
+    return;
+  }
+
+  // play / settings（兼容旧表单）
   const bool random_order = g_server.arg("order") == "rand";
-  const bool refresh_en = g_server.hasArg("refresh_en");
-  const uint32_t d = (uint32_t)g_server.arg("refresh_d").toInt();
-  const uint32_t h = (uint32_t)g_server.arg("refresh_h").toInt();
-  const uint32_t m = (uint32_t)g_server.arg("refresh_m").toInt();
-  saveQuoteSettings(random_order, refresh_en, weatherRefreshSecFromDhm(d, h, m));
-  redirectOk("/quote", "quote");
+  saveQuoteSettings(random_order, cfg.quote_refresh_en, cfg.quote_refresh_sec);
+  redirectOk("/quote", "quote_play");
 }
 
 static void appendRefreshDhmFields(String &b, const char *prefix, uint32_t sec) {
@@ -2021,68 +2208,10 @@ static void handleScheduleGet() {
   String b;
   appendFlashFromQuery(b);
 
-  b += F("<section><h2>定时刷新总览</h2>"
-         "<p class=hint>统一管理各 App 定时动作。也可在对应 App 页单独改。静默时段内"
-         "<strong>不作任何定时动作</strong>（刷新 / 翻页 / App 时间表），过了再说。</p>"
-         "<form method=POST action=/schedule><input type=hidden name=action value=refresh>");
-
-  auto refreshBlock = [&](const char *title, const char *en_name, bool en, const char *prefix,
-                          uint32_t sec) {
-    b += F("<h2 style=margin-top:18px>");
-    b += title;
-    b += F("</h2><label class='check-row");
-    if (en) b += F(" on");
-    b += F("'><input type=checkbox name=");
-    b += en_name;
-    b += F(" value=1");
-    if (en) b += F(" checked");
-    b += F("><span>启用</span></label>");
-    appendRefreshDhmFields(b, prefix, sec);
-  };
-  refreshBlock("天气", "wx_en", cfg.weather_refresh_en, "wx", cfg.weather_refresh_sec);
-  refreshBlock("相册", "alb_en", cfg.album_refresh_en, "alb", cfg.album_refresh_sec);
-  refreshBlock("象棋", "ch_en", cfg.chess_refresh_en, "ch", cfg.chess_refresh_sec);
-  refreshBlock("名言", "qt_en", cfg.quote_refresh_en, "qt", cfg.quote_refresh_sec);
-  b += F("<div class=btn-row><button type=submit>保存定时刷新</button></div></form></section>");
-
-  // 可视化：静默 + App 切换
-  b += F("<section><h2>一日时间轴</h2><div class=sched-day>");
-  for (uint8_t i = 0; i < cfg.quiet_count; i++) {
-    const QuietSlot &q = cfg.quiet_slots[i];
-    if (q.start_min < q.end_min) {
-      const float l = q.start_min * 100.0f / 1440.0f;
-      const float w = (q.end_min - q.start_min) * 100.0f / 1440.0f;
-      b += F("<span class=q style='left:");
-      b += String(l, 2);
-      b += F("%;width:");
-      b += String(w, 2);
-      b += F("%'></span>");
-    } else {
-      // 跨午夜拆两段
-      const float l1 = q.start_min * 100.0f / 1440.0f;
-      b += F("<span class=q style='left:");
-      b += String(l1, 2);
-      b += F("%;width:");
-      b += String(100.0f - l1, 2);
-      b += F("%'></span><span class=q style='left:0;width:");
-      b += String(q.end_min * 100.0f / 1440.0f, 2);
-      b += F("%'></span>");
-    }
-  }
-  for (uint8_t i = 0; i < cfg.app_sched_count; i++) {
-    const float l = cfg.app_sched[i].at_min * 100.0f / 1440.0f;
-    b += F("<span class=m title='");
-    b += appIdLabelZh(static_cast<AppId>(cfg.app_sched[i].app_id));
-    b += F("' style='left:");
-    b += String(l, 2);
-    b += F("%'></span>");
-  }
-  b += F("<div class=lab><span>00:00</span><span>06:00</span><span>12:00</span>"
-         "<span>18:00</span><span>24:00</span></div></div>"
-         "<p class='hint sm'>红块=静默；黑竖线=切 App。下方可编辑。</p></section>");
-
-  b += F("<section><h2>静默时段</h2>"
-         "<p class=hint>一天可多段；结束早于开始表示跨午夜（如 22:00–06:00）。</p>"
+  // ① 静默时段
+  b += F("<section><h2><span class=set-step>1</span>静默时段</h2>"
+         "<p class=hint>静默内<strong>不作任何定时动作</strong>（刷新 / 翻页 / App 时间表）。"
+         "一天可多段；结束早于开始表示跨午夜（如 22:00–06:00）。</p>"
          "<form method=POST action=/schedule><input type=hidden name=action value=quiet>"
          "<label class='check-row");
   if (cfg.quiet_en) b += F(" on");
@@ -2108,8 +2237,9 @@ static void handleScheduleGet() {
   }
   b += F("<div class=btn-row><button type=submit>保存静默时段</button></div></form></section>");
 
-  b += F("<section><h2>每日 App 时间表</h2>"
-         "<p class=hint>到点自动切到指定 App（可选手界面）。按时间表走；静默时段内不切换。</p>"
+  // ② 每日 App 时间表
+  b += F("<section><h2><span class=set-step>2</span>每日 App 时间表</h2>"
+         "<p class=hint>到点自动切到指定 App（可选手界面）。静默时段内不切换。</p>"
          "<form method=POST action=/schedule><input type=hidden name=action value=appsched>"
          "<label class='check-row");
   if (cfg.app_sched_en) b += F(" on");
@@ -2148,6 +2278,69 @@ static void handleScheduleGet() {
     b += F(">天气·7日</option></select></label></div>");
   }
   b += F("<div class=btn-row><button type=submit>保存 App 时间表</button></div></form></section>");
+
+  // ③ 一日时间轴（预览）
+  b += F("<section><h2><span class=set-step>3</span>一日时间轴</h2>"
+         "<p class=hint>上方静默与时间表的可视化预览。</p>"
+         "<div class=sched-day>");
+  for (uint8_t i = 0; i < cfg.quiet_count; i++) {
+    const QuietSlot &q = cfg.quiet_slots[i];
+    if (q.start_min < q.end_min) {
+      const float l = q.start_min * 100.0f / 1440.0f;
+      const float w = (q.end_min - q.start_min) * 100.0f / 1440.0f;
+      b += F("<span class=q style='left:");
+      b += String(l, 2);
+      b += F("%;width:");
+      b += String(w, 2);
+      b += F("%'></span>");
+    } else {
+      // 跨午夜拆两段
+      const float l1 = q.start_min * 100.0f / 1440.0f;
+      b += F("<span class=q style='left:");
+      b += String(l1, 2);
+      b += F("%;width:");
+      b += String(100.0f - l1, 2);
+      b += F("%'></span><span class=q style='left:0;width:");
+      b += String(q.end_min * 100.0f / 1440.0f, 2);
+      b += F("%'></span>");
+    }
+  }
+  for (uint8_t i = 0; i < cfg.app_sched_count; i++) {
+    const float l = cfg.app_sched[i].at_min * 100.0f / 1440.0f;
+    b += F("<span class=m title='");
+    b += appIdLabelZh(static_cast<AppId>(cfg.app_sched[i].app_id));
+    b += F("' style='left:");
+    b += String(l, 2);
+    b += F("%'></span>");
+  }
+  b += F("<div class=lab><span>00:00</span><span>06:00</span><span>12:00</span>"
+         "<span>18:00</span><span>24:00</span></div></div>"
+         "<p class='hint sm'>红块=静默；黑竖线=切 App。</p></section>");
+
+  // ④ 各 App 定时刷新总览
+  b += F("<section><h2><span class=set-step>4</span>定时刷新总览</h2>"
+         "<p class=hint>统一管理各 App 定时动作；也可在对应 App 页单独改。</p>"
+         "<form method=POST action=/schedule><input type=hidden name=action value=refresh>");
+
+  auto refreshBlock = [&](const char *title, const char *en_name, bool en, const char *prefix,
+                          uint32_t sec) {
+    b += F("<h2 style=margin-top:18px>");
+    b += title;
+    b += F("</h2><label class='check-row");
+    if (en) b += F(" on");
+    b += F("'><input type=checkbox name=");
+    b += en_name;
+    b += F(" value=1");
+    if (en) b += F(" checked");
+    b += F("><span>启用</span></label>");
+    appendRefreshDhmFields(b, prefix, sec);
+  };
+  refreshBlock("天气", "wx_en", cfg.weather_refresh_en, "wx", cfg.weather_refresh_sec);
+  refreshBlock("相册", "alb_en", cfg.album_refresh_en, "alb", cfg.album_refresh_sec);
+  refreshBlock("象棋", "ch_en", cfg.chess_refresh_en, "ch", cfg.chess_refresh_sec);
+  refreshBlock("名言", "qt_en", cfg.quote_refresh_en, "qt", cfg.quote_refresh_sec);
+  b += F("<div class=btn-row><button type=submit>保存定时刷新</button></div></form></section>");
+
   sendHtml(NavTab::Schedule, b);
 }
 

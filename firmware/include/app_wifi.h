@@ -19,3 +19,10 @@ int wifiStaRssi();
 String wifiCurrentSsid();
 
 void wifiRadioOff();
+
+// 关 modem sleep；已连则直接返回，否则连保存的 AP
+bool wifiPrepareSta(uint32_t timeout_ms = 15000);
+// 断连再连，清 ESP32 DNS 假死（常见表现：HTTPS connect → start_ssl_client:-1）
+bool wifiForceReconnect(uint32_t timeout_ms = 12000);
+// 解析主机；失败时重试；仍失败可配合 wifiForceReconnect
+bool wifiResolveHost(const char *host, IPAddress &out, int tries = 3);

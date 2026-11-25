@@ -22,6 +22,7 @@ static void clearConfig() {
   g_cfg.tz_offset_min = 480;  // UTC+8
   g_cfg.ntp_interval_days = 30;
   g_cfg.todo_use_local = false;
+  g_cfg.qweather_source = QW_SRC_PORTAL;
   g_cfg.weather_refresh_en = false;
   g_cfg.weather_refresh_sec = 3600;
   g_cfg.chess_random = false;
@@ -233,9 +234,10 @@ static void sanitizeQWeatherHost(char *host, size_t cap) {
   strncpy(host, h.c_str(), cap - 1);
 }
 
-bool saveQWeatherConfig(bool enabled, const char *host, const char *key, const char *loc_id,
-                        const char *loc_name) {
+bool saveQWeatherConfig(bool enabled, uint8_t source, const char *host, const char *key,
+                        const char *loc_id, const char *loc_name) {
   g_cfg.qweather_enabled = enabled;
+  g_cfg.qweather_source = (source == QW_SRC_APIKEY) ? QW_SRC_APIKEY : QW_SRC_PORTAL;
   if (host) {
     strncpy(g_cfg.qweather_host, host, sizeof(g_cfg.qweather_host) - 1);
     sanitizeQWeatherHost(g_cfg.qweather_host, sizeof(g_cfg.qweather_host));
@@ -243,8 +245,11 @@ bool saveQWeatherConfig(bool enabled, const char *host, const char *key, const c
   if (key) {
     String k = key;
     k.trim();
-    memset(g_cfg.qweather_key, 0, sizeof(g_cfg.qweather_key));
-    strncpy(g_cfg.qweather_key, k.c_str(), sizeof(g_cfg.qweather_key) - 1);
+    // 空串或掩码占位：保留已有 Key，避免表单回写把密钥清掉
+    if (k.length() && k.indexOf("********") < 0) {
+      memset(g_cfg.qweather_key, 0, sizeof(g_cfg.qweather_key));
+      strncpy(g_cfg.qweather_key, k.c_str(), sizeof(g_cfg.qweather_key) - 1);
+    }
   }
   if (loc_id) {
     strncpy(g_cfg.qweather_location_id, loc_id, sizeof(g_cfg.qweather_location_id) - 1);
@@ -311,10 +316,16 @@ bool setAppEnabled(uint8_t app_id, bool enabled) {
   return saveAppConfig();
 }
 
+bool qweatherSourceIsApiKey() { return g_cfg.qweather_source == QW_SRC_APIKEY; }
+
 bool qweatherConfigured() {
-  // 天气经 Portal 代理：需要登录 Token + 已选 LocationID（和风密钥在服务器）
-  return g_cfg.qweather_enabled && g_cfg.qweather_location_id[0] && g_cfg.portal_token[0] &&
-         g_cfg.portal_base_url[0];
+  if (!g_cfg.qweather_enabled || !g_cfg.qweather_location_id[0]) return false;
+  if (qweatherSourceIsApiKey()) {
+    // 和风普通 API：Host + Key + LocationID
+    return g_cfg.qweather_host[0] && g_cfg.qweather_key[0];
+  }
+  // Portal 代理：登录 Token + Base URL（和风密钥在服务器）
+  return g_cfg.portal_token[0] && g_cfg.portal_base_url[0];
 }
 
 static constexpr uint32_t kRefreshMinSec = 60;
@@ -535,6 +546,7 @@ String appConfigToJson(bool mask_secrets) {
 
   JsonObject qw = doc["qweather"].to<JsonObject>();
   qw["enabled"] = g_cfg.qweather_enabled;
+  qw["source"] = g_cfg.qweather_source;
   qw["host"] = g_cfg.qweather_host;
   if (mask_secrets && g_cfg.qweather_key[0]) {
     qw["key"] = String(g_cfg.qweather_key).substring(0, 4) + "********";
@@ -635,6 +647,10 @@ bool appConfigFromJson(const char *json) {
   JsonObject qw = doc["qweather"].as<JsonObject>();
   if (!qw.isNull()) {
     g_cfg.qweather_enabled = qw["enabled"] | false;
+    {
+      const int src = qw["source"] | (int)QW_SRC_PORTAL;
+      g_cfg.qweather_source = (src == (int)QW_SRC_APIKEY) ? QW_SRC_APIKEY : QW_SRC_PORTAL;
+    }
     strncpy(g_cfg.qweather_host, qw["host"] | "", sizeof(g_cfg.qweather_host) - 1);
     sanitizeQWeatherHost(g_cfg.qweather_host, sizeof(g_cfg.qweather_host));
     const char *key = qw["key"] | "";

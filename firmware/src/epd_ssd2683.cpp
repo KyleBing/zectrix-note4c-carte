@@ -290,6 +290,8 @@ bool EpdSsd2683::display(bool allow_interrupt) {
     suppress_interrupt_once_ = false;
   }
   allow_interrupt_ = allow_interrupt;
+  // 刷屏过程不亮：清掉拉数 BlinkFast / 连网 BlinkSlow 等残留图案（完成后由 ledDoneFlash 一闪）
+  ledOff();
   powerIdleTouch();
   if (allow_interrupt_) {
     powerNavDisarmUntilRelease();
