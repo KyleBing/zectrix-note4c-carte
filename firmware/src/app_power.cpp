@@ -283,15 +283,17 @@ time_t powerNextWakeUnix(AppId app) {
   }
 
   if (app == AppId::Weather) {
-    const AppConfig &cfg = getAppConfig();
-    if (!cfg.weather_refresh_en) return 0;
-    const uint32_t iv = cfg.weather_refresh_sec;
+    // 按当前天气界面（日/周）取对应间隔；会话里没有则按日天气
+    uint8_t sess_app = 0, sess_wx = 0;
+    int sess_alb = 0;
+    if (!loadUiSession(sess_app, sess_wx, sess_alb)) sess_wx = 0;
+    const uint32_t iv = weatherRefreshSecForMode(sess_wx);
     if (iv < 60) return 0;
     if (!qweatherConfigured()) return 0;
-    uint32_t last = loadWeatherLastUnix();
+    uint32_t last = loadWeatherLastUnixForMode(sess_wx);
     // 关机起重新计间隔：过期/从未刷新都不要立刻当到期（否则早醒会连刷）
     if (last == 0 || (time_t)last + (time_t)iv <= now) {
-      saveWeatherLastUnix((uint32_t)now);
+      saveWeatherLastUnixForMode(sess_wx, (uint32_t)now);
       last = (uint32_t)now;
     }
     return scheduleClampWakeOutOfQuiet((time_t)last + (time_t)iv);

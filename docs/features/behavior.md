@@ -172,7 +172,7 @@ Web 里 BOOT **不等** 500ms，松手后尽快 `webStop()` 并刷 App。
 | `/wifi` | 最多 5 组 WiFi |
 | `/auth` | Portal、登录、Diary ID |
 | `/todo` | 网络 / 本机数据源、编辑与预览 |
-| `/weather` | 天气开关、城市、定时刷新 |
+| `/weather` | 天气开关、城市、日/周天气各自定时刷新 |
 | `/album` | 编辑 / 抖动 / 上传 / 定时翻页 |
 | `/chess` | 练习等级、翻局顺序与定时 |
 | `/quote` | 名言设置与列表编辑 |

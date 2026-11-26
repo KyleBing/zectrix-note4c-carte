@@ -80,6 +80,9 @@ pio run -t upload         # 刷写（env: carte）→ app @ 0x10000
 pio run -t uploadfs       # 字库 LittleFS @ 0xC90000（首次必做）
 pio device monitor        # 115200
 
+# 本机模拟 Web 配置站（各页假数据，不连设备；移动端用浏览器 DevTools）
+python3 tools/web_preview.py          # http://127.0.0.1:8766
+
 # 本机预览相册编辑页（测抖动/出图，不连设备）
 python3 tools/album_preview.py
 ```

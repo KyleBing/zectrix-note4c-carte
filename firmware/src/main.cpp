@@ -489,7 +489,7 @@ void setup() {
     } else if (g_app == AppId::Album) {
       due = albumAutoRefreshDue();
     } else if (g_app == AppId::Weather) {
-      due = weatherAutoRefreshDue();
+      due = weatherAutoRefreshDue(static_cast<uint8_t>(g_weather_mode));
     } else if (g_app == AppId::Chess) {
       due = chessAutoRefreshDue();
     } else if (g_app == AppId::Quote) {
@@ -501,7 +501,8 @@ void setup() {
         const time_t now = time(nullptr);
         if (now >= 1700000000) {
           if (g_app == AppId::Album) saveAlbumLastUnix((uint32_t)now);
-          else if (g_app == AppId::Weather) saveWeatherLastUnix((uint32_t)now);
+          else if (g_app == AppId::Weather)
+            saveWeatherLastUnixForMode(static_cast<uint8_t>(g_weather_mode), (uint32_t)now);
           else if (g_app == AppId::Chess) saveChessLastUnix((uint32_t)now);
           else if (g_app == AppId::Quote) saveQuoteLastUnix((uint32_t)now);
         }
@@ -618,10 +619,10 @@ void loop() {
         }
       }
     }
-    if (g_app == AppId::Weather && weatherAutoRefreshDue()) {
+    if (g_app == AppId::Weather && weatherAutoRefreshDue(static_cast<uint8_t>(g_weather_mode))) {
       busy = true;
-      Serial.printf("[UI] weather auto-refresh (every %u s)\n",
-                    (unsigned)getAppConfig().weather_refresh_sec);
+      Serial.printf("[UI] weather auto-refresh mode=%s every %u s\n", weatherModeName(g_weather_mode),
+                    (unsigned)weatherRefreshSecForMode(static_cast<uint8_t>(g_weather_mode)));
       runShow(false);
       return;
     }

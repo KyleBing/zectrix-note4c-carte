@@ -84,8 +84,9 @@ esptool.py --chip esp32s3 write_flash \
 
 JWT：登录保存；业务响应若带 `X-Access-Token` 则自动更新（portal-go 剩余 &lt; 7 天续签）。
 
-相册编辑页可在电脑浏览器里直接测（不必刷机 / 开 WiFi）：
+Web 配置站可在电脑浏览器里直接模拟（不必刷机 / 开 WiFi）：
 
 ```bash
-python3 tools/album_preview.py    # http://127.0.0.1:8765
+python3 tools/web_preview.py          # http://127.0.0.1:8766  各页假数据
+python3 tools/album_preview.py        # http://127.0.0.1:8765  相册编辑完整能力
 ```

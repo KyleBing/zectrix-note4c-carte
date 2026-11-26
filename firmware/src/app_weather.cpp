@@ -1334,7 +1334,7 @@ bool weatherShowMode(EpdSsd2683 &epd, WeatherMode mode) {
   }
   if (fetched_ok) {
     const time_t now = time(nullptr);
-    if (now >= 1700000000) saveWeatherLastUnix((uint32_t)now);
+    if (now >= 1700000000) saveWeatherLastUnixForMode(static_cast<uint8_t>(mode), (uint32_t)now);
   }
   return true;
 }

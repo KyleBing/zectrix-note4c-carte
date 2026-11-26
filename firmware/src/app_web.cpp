@@ -64,6 +64,14 @@ header .meta .ver{font-size:12px;color:rgba(255,255,255,.55);font-variant-numeri
 header .gh{display:inline-flex;align-items:center;justify-content:center;color:rgba(255,255,255,.7);line-height:0;width:28px;height:28px;flex-shrink:0}
 header .gh svg{display:block;flex-shrink:0}
 header .gh:hover{color:#fff}
+/* 窄屏：标题 + GitHub 置顶一行，功能导航整行在下 */
+@media(max-width:720px){
+  header{display:grid;grid-template-columns:1fr auto;grid-template-areas:"brand meta" "nav nav";align-items:center;gap:10px 12px;padding:12px 14px}
+  header .brand{grid-area:brand;min-width:0}
+  header .meta{grid-area:meta;margin:0}
+  header nav{grid-area:nav;flex:none;width:100%;min-width:0}
+  header nav .nav-sep{margin:0 2px}
+}
 main{max-width:720px;margin:16px auto;padding:0 16px 28px}
 section{display:block;background:#fff;border-radius:12px;padding:18px 16px;margin-bottom:14px;box-shadow:0 1px 2px rgba(0,0,0,.05)}
 h2{font-size:15px;margin:0 0 14px;font-weight:650}
@@ -740,16 +748,20 @@ static void handleRoot() {
     kvRow(b, "天气", String("<span class='pill off'>关闭</span>"));
   }
   {
-    if (!cfg.weather_refresh_en) {
-      kvRow(b, "天气定时", String("<span class='pill off'>关</span>"));
-    } else {
+    auto kvWxTimer = [&](const char *lab, bool en, uint32_t sec) {
+      if (!en) {
+        kvRow(b, lab, String("<span class='pill off'>关</span>"));
+        return;
+      }
       uint32_t d = 0, h = 0, m = 0;
-      weatherRefreshToDhm(cfg.weather_refresh_sec, d, h, m);
+      weatherRefreshToDhm(sec, d, h, m);
       char buf[80];
       snprintf(buf, sizeof(buf), "<span class='pill on'>开 · %u天%u时%u分</span>", (unsigned)d,
                (unsigned)h, (unsigned)m);
-      kvRow(b, "天气定时", String(buf));
-    }
+      kvRow(b, lab, String(buf));
+    };
+    kvWxTimer("日天气", cfg.weather_now_refresh_en, cfg.weather_now_refresh_sec);
+    kvWxTimer("周天气", cfg.weather_week_refresh_en, cfg.weather_week_refresh_sec);
   }
   {
     AlbumList al;
@@ -1693,33 +1705,57 @@ static void appendWeatherForm(String &b, const AppConfig &cfg, const WeatherGeoR
   }
   b += F("</section>");
 
-  // —— ③ 定时刷新 ——
+  // —— ③ 定时刷新：日天气 / 周天气各自间隔 ——
   {
-    uint32_t d = 0, h = 0, m = 0;
-    weatherRefreshToDhm(cfg.weather_refresh_sec, d, h, m);
-    b += F("<section><h2><span class=set-step>3</span>定时刷新</h2>"
-           "<p class=hint>位置设好后可开定时：停留在天气 App 时按间隔拉数；关机且前台是天气则 "
-           "<strong>RTC 定时深睡</strong>到点唤醒刷新再睡。关则不自动刷、关机走松电。"
-           "间隔至少 <strong>1 分钟</strong>。</p>"
-           "<form method=POST action=/weather>"
-           "<label class='check-row");
-    if (cfg.weather_refresh_en) b += F(" on");
-    b += F("'><input type=checkbox name=refresh_en value=1");
-    if (cfg.weather_refresh_en) b += F(" checked");
-    b += F("><span>启用天气定时刷新</span></label>"
-           "<div class=btn-row style=align-items:flex-end;gap:10px>"
-           "<label style=margin:0>天<br><input name=refresh_d type=number min=0 max=365 step=1 value=");
-    b += String(d);
-    b += F(" style=width:5.5em></label>"
-           "<label style=margin:0>时<br><input name=refresh_h type=number min=0 max=23 step=1 value=");
-    b += String(h);
-    b += F(" style=width:5.5em></label>"
-           "<label style=margin:0>分<br><input name=refresh_m type=number min=0 max=59 step=1 value=");
-    b += String(m);
-    b += F(" style=width:5.5em></label>"
-           "</div>"
-           "<div class=btn-row><button type=submit name=action value=refresh>保存定时设置</button></div>"
-           "</form></section>");
+    auto appendRefreshBlock = [&](const char *step, const char *title, const char *hint,
+                                  const char *en_name, bool en, const char *prefix, uint32_t sec) {
+      uint32_t d = 0, h = 0, m = 0;
+      weatherRefreshToDhm(sec, d, h, m);
+      b += F("<section><h2><span class=set-step>");
+      b += step;
+      b += F("</span>");
+      b += title;
+      b += F("</h2><p class=hint>");
+      b += hint;
+      b += F("</p><form method=POST action=/weather>"
+             "<input type=hidden name=action value=refresh>"
+             "<label class='check-row");
+      if (en) b += F(" on");
+      b += F("'><input type=checkbox name=");
+      b += en_name;
+      b += F(" value=1");
+      if (en) b += F(" checked");
+      b += F("><span>启用定时刷新</span></label>"
+             "<div class=btn-row style=align-items:flex-end;gap:10px>"
+             "<label style=margin:0>天<br><input name=");
+      b += prefix;
+      b += F("_d type=number min=0 max=365 step=1 value=");
+      b += String(d);
+      b += F(" style=width:5.5em></label>"
+             "<label style=margin:0>时<br><input name=");
+      b += prefix;
+      b += F("_h type=number min=0 max=23 step=1 value=");
+      b += String(h);
+      b += F(" style=width:5.5em></label>"
+             "<label style=margin:0>分<br><input name=");
+      b += prefix;
+      b += F("_m type=number min=0 max=59 step=1 value=");
+      b += String(m);
+      b += F(" style=width:5.5em></label></div>"
+             "<div class=btn-row><button type=submit>保存");
+      b += title;
+      b += F("</button></div></form></section>");
+    };
+    appendRefreshBlock(
+        "3", "日天气定时",
+        "停留在 <strong>NOW</strong> 时按此间隔拉实况/小时；关机且当前是日天气则 RTC 到点醒刷。"
+        "间隔至少 <strong>1 分钟</strong>。",
+        "now_en", cfg.weather_now_refresh_en, "now", cfg.weather_now_refresh_sec);
+    appendRefreshBlock(
+        "4", "周天气定时",
+        "停留在 <strong>7D</strong> 时按此间隔拉七日预报；关机且当前是周天气则 RTC 到点醒刷。"
+        "建议比日天气更长（默认 6 小时）。间隔至少 <strong>1 分钟</strong>。",
+        "week_en", cfg.weather_week_refresh_en, "week", cfg.weather_week_refresh_sec);
   }
 }
 
@@ -1747,24 +1783,41 @@ static void handleWeatherPost() {
                        cfg.qweather_location_name);
     flash = F("<div class='flash ok'>数据源已保存</div>");
   } else if (action == "refresh") {
-    const bool en = g_server.hasArg("refresh_en");
-    const uint32_t d = (uint32_t)g_server.arg("refresh_d").toInt();
-    const uint32_t h = (uint32_t)g_server.arg("refresh_h").toInt();
-    const uint32_t m = (uint32_t)g_server.arg("refresh_m").toInt();
-    const uint32_t sec = weatherRefreshSecFromDhm(d, h, m);
-    saveWeatherRefreshSec(sec);
-    saveWeatherRefreshEn(en);
-    uint32_t od = 0, oh = 0, om = 0;
-    weatherRefreshToDhm(getAppConfig().weather_refresh_sec, od, oh, om);
-    flash = F("<div class='flash ok'>天气定时：");
-    flash += en ? F("开") : F("关");
-    flash += F(" · ");
-    flash += String(od);
-    flash += F(" 天 ");
-    flash += String(oh);
-    flash += F(" 时 ");
-    flash += String(om);
-    flash += F(" 分</div>");
+    // 表单带 now_* 或 week_*；一次只改对应档
+    const bool has_now = g_server.hasArg("now_d") || g_server.hasArg("now_h") ||
+                         g_server.hasArg("now_m") || g_server.hasArg("now_en");
+    const bool has_week = g_server.hasArg("week_d") || g_server.hasArg("week_h") ||
+                          g_server.hasArg("week_m") || g_server.hasArg("week_en");
+    auto flashTimer = [&](const char *lab, bool en, uint32_t sec) {
+      uint32_t od = 0, oh = 0, om = 0;
+      weatherRefreshToDhm(sec, od, oh, om);
+      flash = F("<div class='flash ok'>");
+      flash += lab;
+      flash += F("：");
+      flash += en ? F("开") : F("关");
+      flash += F(" · ");
+      flash += String(od);
+      flash += F(" 天 ");
+      flash += String(oh);
+      flash += F(" 时 ");
+      flash += String(om);
+      flash += F(" 分</div>");
+    };
+    if (has_week && !has_now) {
+      const bool en = g_server.hasArg("week_en");
+      const uint32_t sec = weatherRefreshSecFromDhm((uint32_t)g_server.arg("week_d").toInt(),
+                                                   (uint32_t)g_server.arg("week_h").toInt(),
+                                                   (uint32_t)g_server.arg("week_m").toInt());
+      saveWeatherWeekRefresh(en, sec);
+      flashTimer("周天气定时", en, getAppConfig().weather_week_refresh_sec);
+    } else {
+      const bool en = g_server.hasArg("now_en");
+      const uint32_t sec = weatherRefreshSecFromDhm((uint32_t)g_server.arg("now_d").toInt(),
+                                                   (uint32_t)g_server.arg("now_h").toInt(),
+                                                   (uint32_t)g_server.arg("now_m").toInt());
+      saveWeatherNowRefresh(en, sec);
+      flashTimer("日天气定时", en, getAppConfig().weather_now_refresh_sec);
+    }
   } else if (action == "search") {
     last_query = g_server.arg("geo_query");
     if (!weatherGeoLookup(last_query.c_str(), geo)) {
@@ -2335,7 +2388,10 @@ static void handleScheduleGet() {
     b += F("><span>启用</span></label>");
     appendRefreshDhmFields(b, prefix, sec);
   };
-  refreshBlock("天气", "wx_en", cfg.weather_refresh_en, "wx", cfg.weather_refresh_sec);
+  refreshBlock("日天气", "wx_now_en", cfg.weather_now_refresh_en, "wx_now",
+               cfg.weather_now_refresh_sec);
+  refreshBlock("周天气", "wx_week_en", cfg.weather_week_refresh_en, "wx_week",
+               cfg.weather_week_refresh_sec);
   refreshBlock("相册", "alb_en", cfg.album_refresh_en, "alb", cfg.album_refresh_sec);
   refreshBlock("象棋", "ch_en", cfg.chess_refresh_en, "ch", cfg.chess_refresh_sec);
   refreshBlock("名言", "qt_en", cfg.quote_refresh_en, "qt", cfg.quote_refresh_sec);
@@ -2388,11 +2444,14 @@ static void handleSchedulePost() {
 
   // refresh_all
   {
-    const uint32_t wx = weatherRefreshSecFromDhm((uint32_t)g_server.arg("wx_d").toInt(),
-                                                (uint32_t)g_server.arg("wx_h").toInt(),
-                                                (uint32_t)g_server.arg("wx_m").toInt());
-    saveWeatherRefreshSec(wx);
-    saveWeatherRefreshEn(g_server.hasArg("wx_en"));
+    const uint32_t now_sec = weatherRefreshSecFromDhm((uint32_t)g_server.arg("wx_now_d").toInt(),
+                                                     (uint32_t)g_server.arg("wx_now_h").toInt(),
+                                                     (uint32_t)g_server.arg("wx_now_m").toInt());
+    saveWeatherNowRefresh(g_server.hasArg("wx_now_en"), now_sec);
+    const uint32_t week_sec = weatherRefreshSecFromDhm((uint32_t)g_server.arg("wx_week_d").toInt(),
+                                                      (uint32_t)g_server.arg("wx_week_h").toInt(),
+                                                      (uint32_t)g_server.arg("wx_week_m").toInt());
+    saveWeatherWeekRefresh(g_server.hasArg("wx_week_en"), week_sec);
   }
   {
     const uint32_t alb = weatherRefreshSecFromDhm((uint32_t)g_server.arg("alb_d").toInt(),

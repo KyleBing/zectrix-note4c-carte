@@ -205,14 +205,18 @@ bool statusShow(EpdSsd2683 &epd) {
   y += 6;
 
   {
-    if (!cfg.weather_refresh_en) {
-      y = drawKv(epd, y, "天气定时", "关");
-    } else {
+    auto drawWxTimer = [&](const char *lab, bool en, uint32_t sec) {
+      if (!en) {
+        y = drawKv(epd, y, lab, "关");
+        return;
+      }
       uint32_t d = 0, h = 0, m = 0;
-      weatherRefreshToDhm(cfg.weather_refresh_sec, d, h, m);
+      weatherRefreshToDhm(sec, d, h, m);
       snprintf(val, sizeof(val), "开 %u 天 %u 时 %u 分", (unsigned)d, (unsigned)h, (unsigned)m);
-      y = drawKv(epd, y, "天气定时", val, Theme::Alert);
-    }
+      y = drawKv(epd, y, lab, val, Theme::Alert);
+    };
+    drawWxTimer("日天气", cfg.weather_now_refresh_en, cfg.weather_now_refresh_sec);
+    drawWxTimer("周天气", cfg.weather_week_refresh_en, cfg.weather_week_refresh_sec);
   }
   {
     if (!cfg.album_refresh_en) {

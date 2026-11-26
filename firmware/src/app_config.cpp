@@ -23,8 +23,10 @@ static void clearConfig() {
   g_cfg.ntp_interval_days = 30;
   g_cfg.todo_use_local = false;
   g_cfg.qweather_source = QW_SRC_PORTAL;
-  g_cfg.weather_refresh_en = false;
-  g_cfg.weather_refresh_sec = 3600;
+  g_cfg.weather_now_refresh_en = false;
+  g_cfg.weather_now_refresh_sec = 3600;
+  g_cfg.weather_week_refresh_en = false;
+  g_cfg.weather_week_refresh_sec = 21600;  // 周预报默认 6 小时
   g_cfg.chess_random = false;
   g_cfg.chess_levels = CHESS_LV_ALL;
   g_cfg.chess_refresh_en = false;
@@ -331,6 +333,7 @@ bool qweatherConfigured() {
 static constexpr uint32_t kRefreshMinSec = 60;
 static constexpr uint32_t kRefreshMaxSec = 365UL * 86400UL;
 static constexpr uint32_t kRefreshDefaultSec = 3600;
+static constexpr uint32_t kWeatherWeekDefaultSec = 21600;  // 6h
 
 static uint32_t clampRefreshSec(uint32_t sec) {
   if (sec < kRefreshMinSec) sec = kRefreshMinSec;
@@ -357,35 +360,61 @@ void weatherRefreshToDhm(uint32_t sec, uint32_t &days, uint32_t &hours, uint32_t
   minutes = sec / 60UL;
 }
 
-bool saveWeatherRefreshEn(bool en) {
-  g_cfg.weather_refresh_en = en;
-  if (en && g_cfg.weather_refresh_sec < kRefreshMinSec) {
-    g_cfg.weather_refresh_sec = kRefreshDefaultSec;
+bool weatherModeIsWeek(uint8_t weather_mode) {
+  // WeatherMode::Week7=2, Week14=3
+  return weather_mode == 2 || weather_mode == 3;
+}
+
+bool saveWeatherNowRefresh(bool en, uint32_t sec) {
+  g_cfg.weather_now_refresh_en = en;
+  g_cfg.weather_now_refresh_sec = clampRefreshSec(sec == 0 ? kRefreshDefaultSec : sec);
+  if (en && g_cfg.weather_now_refresh_sec < kRefreshMinSec) {
+    g_cfg.weather_now_refresh_sec = kRefreshDefaultSec;
   }
   return saveAppConfig();
 }
 
-bool saveWeatherRefreshSec(uint32_t sec) {
-  g_cfg.weather_refresh_sec = clampRefreshSec(sec == 0 ? kRefreshDefaultSec : sec);
+bool saveWeatherWeekRefresh(bool en, uint32_t sec) {
+  g_cfg.weather_week_refresh_en = en;
+  g_cfg.weather_week_refresh_sec = clampRefreshSec(sec == 0 ? kWeatherWeekDefaultSec : sec);
+  if (en && g_cfg.weather_week_refresh_sec < kRefreshMinSec) {
+    g_cfg.weather_week_refresh_sec = kWeatherWeekDefaultSec;
+  }
   return saveAppConfig();
 }
 
-uint32_t loadWeatherLastUnix() {
-  if (!g_prefs.isKey("wx_last")) return 0;
-  return g_prefs.getUInt("wx_last", 0);
+uint32_t loadWeatherLastUnixForMode(uint8_t weather_mode) {
+  const char *key = weatherModeIsWeek(weather_mode) ? "wx_week_last" : "wx_now_last";
+  // 旧单一 wx_last：无分档记录时回退，避免升级后立刻连刷
+  if (!g_prefs.isKey(key)) {
+    if (g_prefs.isKey("wx_last")) return g_prefs.getUInt("wx_last", 0);
+    return 0;
+  }
+  return g_prefs.getUInt(key, 0);
 }
 
-void saveWeatherLastUnix(uint32_t unix_sec) { g_prefs.putUInt("wx_last", unix_sec); }
+void saveWeatherLastUnixForMode(uint8_t weather_mode, uint32_t unix_sec) {
+  const char *key = weatherModeIsWeek(weather_mode) ? "wx_week_last" : "wx_now_last";
+  g_prefs.putUInt(key, unix_sec);
+}
 
-bool weatherAutoRefreshDue() {
-  if (!g_cfg.weather_refresh_en) return false;
-  const uint32_t iv = g_cfg.weather_refresh_sec;
+uint32_t weatherRefreshSecForMode(uint8_t weather_mode) {
+  if (weatherModeIsWeek(weather_mode)) {
+    if (!g_cfg.weather_week_refresh_en) return 0;
+    return g_cfg.weather_week_refresh_sec;
+  }
+  if (!g_cfg.weather_now_refresh_en) return 0;
+  return g_cfg.weather_now_refresh_sec;
+}
+
+bool weatherAutoRefreshDue(uint8_t weather_mode) {
+  const uint32_t iv = weatherRefreshSecForMode(weather_mode);
   if (iv < kRefreshMinSec) return false;
   if (!qweatherConfigured()) return false;
   if (!appIdEnabled(AppId::Weather)) return false;
   const time_t now = time(nullptr);
   if (now < 1700000000) return false;
-  const uint32_t last = loadWeatherLastUnix();
+  const uint32_t last = loadWeatherLastUnixForMode(weather_mode);
   if (last == 0) return false;
   return (uint32_t)now >= last + iv;
 }
@@ -557,8 +586,10 @@ String appConfigToJson(bool mask_secrets) {
   }
   qw["location_id"] = g_cfg.qweather_location_id;
   qw["location_name"] = g_cfg.qweather_location_name;
-  qw["refresh_en"] = g_cfg.weather_refresh_en;
-  qw["refresh_sec"] = g_cfg.weather_refresh_sec;
+  qw["now_refresh_en"] = g_cfg.weather_now_refresh_en;
+  qw["now_refresh_sec"] = g_cfg.weather_now_refresh_sec;
+  qw["week_refresh_en"] = g_cfg.weather_week_refresh_en;
+  qw["week_refresh_sec"] = g_cfg.weather_week_refresh_sec;
   doc["idle_off_sec"] = g_cfg.idle_off_sec;
   doc["idle_off_on_power"] = g_cfg.idle_off_on_power;
   doc["album_show_header"] = g_cfg.album_show_header;
@@ -660,27 +691,51 @@ bool appConfigFromJson(const char *json) {
     strncpy(g_cfg.qweather_location_id, qw["location_id"] | "", sizeof(g_cfg.qweather_location_id) - 1);
     strncpy(g_cfg.qweather_location_name, qw["location_name"] | "",
             sizeof(g_cfg.qweather_location_name) - 1);
-    if (qw["refresh_sec"].is<uint32_t>() || qw["refresh_sec"].is<int>()) {
-      uint32_t sec = (uint32_t)(qw["refresh_sec"] | 0);
-      if (sec == 0) {
-        // 旧配置：0 = 关 → 开关关，间隔保留默认
-        g_cfg.weather_refresh_en = false;
-        g_cfg.weather_refresh_sec = kRefreshDefaultSec;
+    // 新：日/周分档；旧 refresh_* 迁到日天气，周天气默认 6h、同开关
+    const bool has_now = qw["now_refresh_sec"].is<uint32_t>() || qw["now_refresh_sec"].is<int>() ||
+                         qw["now_refresh_en"].is<bool>();
+    const bool has_week = qw["week_refresh_sec"].is<uint32_t>() || qw["week_refresh_sec"].is<int>() ||
+                          qw["week_refresh_en"].is<bool>();
+    if (has_now || has_week) {
+      if (qw["now_refresh_sec"].is<uint32_t>() || qw["now_refresh_sec"].is<int>()) {
+        uint32_t sec = (uint32_t)(qw["now_refresh_sec"] | 0);
+        g_cfg.weather_now_refresh_sec = clampRefreshSec(sec == 0 ? kRefreshDefaultSec : sec);
       } else {
-        g_cfg.weather_refresh_sec = clampRefreshSec(sec);
-        if (qw["refresh_en"].is<bool>()) {
-          g_cfg.weather_refresh_en = qw["refresh_en"].as<bool>();
-        } else {
-          g_cfg.weather_refresh_en = true;  // 旧配置有间隔即视为开
-        }
+        g_cfg.weather_now_refresh_sec = kRefreshDefaultSec;
       }
+      g_cfg.weather_now_refresh_en = qw["now_refresh_en"] | false;
+      if (qw["week_refresh_sec"].is<uint32_t>() || qw["week_refresh_sec"].is<int>()) {
+        uint32_t sec = (uint32_t)(qw["week_refresh_sec"] | 0);
+        g_cfg.weather_week_refresh_sec = clampRefreshSec(sec == 0 ? kWeatherWeekDefaultSec : sec);
+      } else {
+        g_cfg.weather_week_refresh_sec = kWeatherWeekDefaultSec;
+      }
+      g_cfg.weather_week_refresh_en = qw["week_refresh_en"] | false;
+    } else if (qw["refresh_sec"].is<uint32_t>() || qw["refresh_sec"].is<int>()) {
+      uint32_t sec = (uint32_t)(qw["refresh_sec"] | 0);
+      bool en = false;
+      if (sec == 0) {
+        en = false;
+        sec = kRefreshDefaultSec;
+      } else {
+        sec = clampRefreshSec(sec);
+        en = qw["refresh_en"].is<bool>() ? qw["refresh_en"].as<bool>() : true;
+      }
+      g_cfg.weather_now_refresh_en = en;
+      g_cfg.weather_now_refresh_sec = sec;
+      g_cfg.weather_week_refresh_en = en;
+      g_cfg.weather_week_refresh_sec = kWeatherWeekDefaultSec;
     } else {
-      g_cfg.weather_refresh_sec = kRefreshDefaultSec;
-      g_cfg.weather_refresh_en = qw["refresh_en"] | false;
+      g_cfg.weather_now_refresh_sec = kRefreshDefaultSec;
+      g_cfg.weather_now_refresh_en = qw["refresh_en"] | false;
+      g_cfg.weather_week_refresh_sec = kWeatherWeekDefaultSec;
+      g_cfg.weather_week_refresh_en = g_cfg.weather_now_refresh_en;
     }
   } else {
-    g_cfg.weather_refresh_sec = kRefreshDefaultSec;
-    g_cfg.weather_refresh_en = false;
+    g_cfg.weather_now_refresh_sec = kRefreshDefaultSec;
+    g_cfg.weather_now_refresh_en = false;
+    g_cfg.weather_week_refresh_sec = kWeatherWeekDefaultSec;
+    g_cfg.weather_week_refresh_en = false;
   }
 
   g_cfg.idle_off_sec = doc["idle_off_sec"] | 0;

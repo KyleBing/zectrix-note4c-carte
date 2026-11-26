@@ -71,8 +71,11 @@ struct AppConfig {
   char qweather_key[QW_KEY_MAX];
   char qweather_location_id[QW_LOC_ID_MAX];
   char qweather_location_name[QW_LOC_NAME_MAX];
-  bool weather_refresh_en;       // 天气定时刷新 / 关机定时醒；默认 false
-  uint32_t weather_refresh_sec;  // 间隔秒；开启时至少 60；默认 3600
+  // 日天气（NOW）/ 周天气（7D）各自开关与间隔；开启时至少 60 秒
+  bool weather_now_refresh_en;        // 默认 false
+  uint32_t weather_now_refresh_sec;   // 默认 3600
+  bool weather_week_refresh_en;       // 默认 false
+  uint32_t weather_week_refresh_sec;  // 默认 21600（6 小时）
 
   // 国际象棋练习
   bool chess_random;             // false=顺序，true=乱序；默认 false
@@ -115,15 +118,17 @@ bool saveQWeatherConfig(bool enabled, uint8_t source, const char *host, const ch
                         const char *loc_id, const char *loc_name);
 bool qweatherConfigured();
 bool qweatherSourceIsApiKey();
-bool saveWeatherRefreshEn(bool en);
-// 间隔钳到 [60, 365 天]；开关关闭时仍可改间隔
-bool saveWeatherRefreshSec(uint32_t sec);
+// 日/周天气定时：间隔钳到 [60, 365 天]；开关关闭时仍可改间隔
+bool saveWeatherNowRefresh(bool en, uint32_t sec);
+bool saveWeatherWeekRefresh(bool en, uint32_t sec);
 uint32_t weatherRefreshSecFromDhm(uint32_t days, uint32_t hours, uint32_t minutes);
 void weatherRefreshToDhm(uint32_t sec, uint32_t &days, uint32_t &hours, uint32_t &minutes);
-// 上次成功刷新的 unix 秒（NVS）；0 = 未知
-uint32_t loadWeatherLastUnix();
-void saveWeatherLastUnix(uint32_t unix_sec);
-bool weatherAutoRefreshDue();  // 开关开 + 间隔到期（需有效系统时间）
+// weather_mode 为 WeatherMode 数值；Week7/Week14 走周刷新，其余走日刷新
+bool weatherModeIsWeek(uint8_t weather_mode);
+uint32_t loadWeatherLastUnixForMode(uint8_t weather_mode);
+void saveWeatherLastUnixForMode(uint8_t weather_mode, uint32_t unix_sec);
+bool weatherAutoRefreshDue(uint8_t weather_mode);  // 对应档开关开 + 间隔到期
+uint32_t weatherRefreshSecForMode(uint8_t weather_mode);  // 关则 0
 
 bool saveAlbumRefreshEn(bool en);
 bool saveAlbumRefreshSec(uint32_t sec);
